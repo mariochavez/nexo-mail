@@ -1,0 +1,12 @@
+# Raw ruby_llm comparison spike — not part of the shipped agent.
+triage_raw.rb
+
+# Generated triage output.
+inbox-digest.md
+inbox-digest-*.md
+
+# Ruby / bundler
+/.bundle/
+/vendor/bundle/
+*.gem
+.DS_Store
