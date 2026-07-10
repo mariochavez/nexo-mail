@@ -1,4 +1,4 @@
-# mail-agent — AI email triage for Apple Mail, Gmail & HEY
+# Nexo Mail Agent — AI email triage for Apple Mail, Gmail & HEY
 
 An AI agent that **triages your email and writes a prioritized markdown digest**,
 built on the [`nexo_ai`](https://rubygems.org/gems/nexo_ai) agent harness. It reads
@@ -131,7 +131,7 @@ export GMAIL_APP_PASSWORD='xxxx xxxx xxxx xxxx'
 That's it — `ruby triage_all.rb` will now triage Gmail. Tools used: `List` (recent
 INBOX messages: uid, from, subject, date) and `Read` (one message body by uid).
 
-> ℹ️ App passwords need 2FA enabled. Some **Workspace** accounts have IMAP or app
+> **Note:** App passwords need 2FA enabled. Some **Workspace** accounts have IMAP or app
 > passwords disabled by an admin — personal Gmail is unaffected. IMAP exposes
 > folders/messages (not Gmail's native thread/label objects), which is all triage
 > needs.

@@ -1,6 +1,6 @@
 # Architecture
 
-How `mail-agent` is put together, bottom to top.
+How Nexo Mail Agent is put together, bottom to top.
 
 ## Core idea
 

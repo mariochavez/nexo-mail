@@ -47,7 +47,7 @@ end
 SPINNER = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
 
 puts
-puts UI.header.render("📬  mail-agent — Apple Mail · Gmail · HEY")
+puts UI.header.render("Nexo Mail Agent — Apple Mail · Gmail · HEY")
 puts
 
 # --- Run the workflow in the background; animate a spinner + clock -----------
@@ -64,7 +64,7 @@ frame = 0
 while worker.alive?
   elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   print "\r#{UI.brand.render(SPINNER[frame % SPINNER.size])} " \
-        "Triaging 3 inboxes…  #{UI.dim.render("⏱ #{UI.clock(elapsed)}")}   "
+        "Triaging 3 inboxes…  #{UI.dim.render("elapsed #{UI.clock(elapsed)}")}   "
   $stdout.flush
   frame += 1
   sleep 0.1
