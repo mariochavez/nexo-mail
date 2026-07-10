@@ -16,7 +16,7 @@ harness is the rest.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  ENTRY POINT        triage.rb                                     │
+│  ENTRY POINT        exe/nexo-triage                               │
 │    runs the workflow, streams the event log, prints the digest   │
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -35,7 +35,7 @@ harness is the rest.
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
-│  KNOWLEDGE          skills/email_triage/SKILL.md                 │
+│  KNOWLEDGE          app/skills/email_triage/SKILL.md             │
 │    buckets (Action/FYI/Noise), digest template, VIP senders,    │
 │    injected into every agent as system prompt                   │
 └─────────────────────────────────────────────────────────────────┘
@@ -63,14 +63,14 @@ agent."
 | Service | Pattern | Where | Read-only because… |
 |---------|---------|-------|--------------------|
 | Apple Mail | **MCP** | `mcp :mail` macro in `AppleMailSource` | Nexo's MCP gate is fail-closed; only `MAIL_READ_TOOLS` are allowed |
-| Gmail | **IMAP tools** | `lib/gmail_imap.rb` (`List`, `Read`) | mailbox opened with `EXAMINE`; `BODY.PEEK` doesn't set flags |
-| HEY | **CLI-wrapper tools** | `lib/cli_sources.rb` (`HeyImbox`, `HeyThread`) | argv arrays (no shell) to hardcoded read subcommands |
+| Gmail | **IMAP tools** | `app/tools/gmail_imap/` (`List`, `Read`) | mailbox opened with `EXAMINE`; `BODY.PEEK` doesn't set flags |
+| HEY | **CLI-wrapper tools** | `app/tools/hey_imbox.rb`, `hey_thread.rb` | argv arrays (no shell) to hardcoded read subcommands |
 
 `GmailSource`/`HeySource` attach their tools by overriding `Nexo::Agent#chat`
 (calling `super`, then `with_tools(...)`). `AppleMailSource` uses the `mcp` macro
 instead, so it needs no override.
 
-## How a run flows (`triage.rb`)
+## How a run flows (`exe/nexo-triage`)
 
 1. `MultiInboxTriage.run` starts a **workflow** — it gets a `runId`, a status, and
    an event log — and `mkdir`s `./sandbox`.
@@ -83,8 +83,12 @@ instead, so it needs no override.
    note; the other sources still run.
 4. The fragments are handed to the **merge agent**, which pools "needs action"
    across sources, applies the VIP rules, and **writes** `./sandbox/inbox-digest.md`.
-5. The workflow reads that file back and records it as an **artifact**; `triage.rb`
-   prints it.
+5. The workflow reads that file back and records it as an **artifact**;
+   `exe/nexo-triage` prints it.
+
+Sources are **preflight-checked** before step 2: one whose binary is missing or
+whose credentials are absent is skipped (with a reason) and never enters the fan-out;
+one that errors mid-run degrades to a "failed" note. The run always continues.
 
 ## Safety model (cross-cutting)
 
@@ -114,10 +118,11 @@ instead, so it needs no override.
 
 | Layer | File |
 |-------|------|
-| Entry point | `triage.rb` |
-| Orchestration + agents | `lib/multi_inbox.rb` |
-| Knowledge | `skills/email_triage/SKILL.md` |
-| Integration — Gmail (IMAP) | `lib/gmail_imap.rb` |
-| Integration — HEY / gws (CLI) | `lib/cli_sources.rb` |
-| Integration — Apple Mail (MCP) | `mcp :mail` macro in `lib/multi_inbox.rb` |
-| Model/shared config | `lib/config.rb` |
+| Entry point | `exe/nexo-triage` |
+| Orchestration | `app/workflows/multi_inbox_triage.rb` |
+| Agents | `app/agents/*.rb` |
+| Knowledge | `app/skills/email_triage/SKILL.md` |
+| Integration — Gmail (IMAP) | `app/tools/gmail_imap.rb` + `app/tools/gmail_imap/` |
+| Integration — HEY / gws (CLI) | `app/tools/hey_*.rb`, `app/tools/gws_*.rb`, `app/tools/cli_reader.rb` |
+| Integration — Apple Mail (MCP) | `mcp :mail` macro in `app/agents/apple_mail_source.rb` |
+| Boot / shared config | `config/environment.rb` |

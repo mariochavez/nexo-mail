@@ -25,25 +25,36 @@ read subcommands — the model never gets a general shell.
 
 ## How it works
 
-One entry point, **`triage.rb`**, runs a **Nexo Workflow**: one read-only triage
-agent per source classifies its inbox and writes a digest **fragment** into
+One executable, **`exe/nexo-triage`**, runs a **Nexo Workflow**: one read-only
+triage agent per source classifies its inbox and writes a digest **fragment** into
 `./sandbox`; a **merge agent** then combines the fragments into one unified
-`./sandbox/inbox-digest.md`. A source that's unauthenticated or offline degrades to
-a visible "Triage failed" section instead of sinking the whole run.
+`./sandbox/inbox-digest.md`.
 
-Classification logic lives in a **skill** (`skills/email_triage/SKILL.md`) — the
+**Bulletproof.** Each source is preflight-checked — a missing binary or absent
+credentials means that source is **skipped** (with a reason) and the run continues
+with whatever's available; a source that errors mid-run degrades to a "failed"
+note. The run never sinks because one inbox isn't ready.
+
+Classification logic lives in a **skill** (`app/skills/email_triage/SKILL.md`) — the
 buckets, the digest template, and your always-important senders (see *Customizing*).
 
-### Files
+### Layout (Rails-like)
 
-| File | Role |
-|------|------|
-| `lib/config.rb` | Shared LLM/Nexo config + the `SANDBOX_DIR` workspace path |
-| `lib/gmail_imap.rb` | Read-only Gmail `RubyLLM::Tool`s over IMAP (App Password) |
-| `lib/cli_sources.rb` | Read-only `RubyLLM::Tool` wrappers for the `hey` CLI (+ optional `gws` Gmail) |
-| `lib/multi_inbox.rb` | Per-source agents + merge agent + `MultiInboxTriage` workflow |
-| `skills/email_triage/SKILL.md` | Classification rules, digest template, VIP senders |
-| `triage.rb` | Runner — triages all three sources → unified digest |
+```
+app/
+  agents/      SourceAgent + AppleMailSource / GmailSource / HeySource / MergeDigests
+  tools/       CliReader, HeyImbox, HeyThread, GmailImap(::List/::Read), Gws* (optional)
+  skills/      email_triage/SKILL.md
+  workflows/   MultiInboxTriage
+config/
+  environment.rb   boot: gems, LLM/Nexo config, shared constants, Zeitwerk autoload
+exe/
+  nexo-triage      the styled runner
+```
+
+`app/agents`, `app/tools`, and `app/workflows` are Zeitwerk autoload roots, so
+classes are top-level (`SourceAgent`, `HeyImbox`, `MultiInboxTriage`) with no manual
+`require`s — matching Nexo's own `app/agents` / `app/workflows` convention.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design.
 
@@ -81,7 +92,7 @@ Override any of these via env vars (no code change):
 | `LLM_API_BASE` | `http://localhost:11434/v1` | Ollama OpenAI-compatible endpoint |
 | `LLM_API_KEY` | *(unset)* | sent as the API key (needed for Cloud models) |
 
-Local model instead? `ollama pull llama3.1` then `LLM_MODEL=llama3.1 ruby triage.rb`.
+Local model instead? `ollama pull llama3.1` then `LLM_MODEL=llama3.1 exe/nexo-triage`.
 
 ---
 
@@ -140,7 +151,7 @@ INBOX messages: uid, from, subject, date) and `Read` (one message body by uid).
 <summary><b>Alternative: Gmail via the <code>gws</code> OAuth CLI</b> (heavier — needs gcloud + a GCP OAuth client)</summary>
 
 Use this only if you want Gmail's native API (labels/threads) instead of IMAP.
-Switch `GmailSource#source_tools` in `lib/multi_inbox.rb` to
+Switch `GmailSource#source_tools` in `app/agents/gmail_source.rb` to
 `[CliSources::GmailUnread, CliSources::GmailRead]`, then:
 
 ```sh
@@ -187,26 +198,27 @@ postings) and `hey threads <id>` (one thread). Reply/drafts are never wrapped.
 
 ```sh
 export LLM_API_KEY=...   # for glm-5.2:cloud via Ollama Cloud (if not already set)
-ruby triage.rb
+exe/nexo-triage
 ```
 
 You get a styled run (Charm for Ruby): a live spinner + elapsed clock while the
-three sources triage concurrently, a per-source timing summary, and the unified
-digest rendered as markdown. It's written to `./sandbox/inbox-digest.md` (per-source
-fragments land alongside it); the whole `./sandbox/` folder is git-ignored.
+available sources triage concurrently, a per-source outcome summary
+(`✓` done · `✗` failed · `⊘` skipped, with reasons), and the unified digest rendered
+as markdown. It's written to `./sandbox/inbox-digest.md` (per-source fragments land
+alongside it); the whole `./sandbox/` folder is git-ignored.
 
 `ruby_llm`/MCP logs are silenced by default. To see the raw HTTP/MCP trace for
 debugging:
 
 ```sh
-RUBYLLM_WIRE=1 ruby triage.rb
+RUBYLLM_WIRE=1 exe/nexo-triage
 ```
 
 ---
 
 ## Customizing
 
-**Always-important senders.** Edit `skills/email_triage/SKILL.md` — the
+**Always-important senders.** Edit `app/skills/email_triage/SKILL.md` — the
 "Always surface" list is always included in the digest. It already includes
 `FOTOSETIEMBRE` and `500 Global`; add your own there.
 
