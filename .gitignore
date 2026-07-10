@@ -1,7 +1,14 @@
 # Raw ruby_llm comparison spike — not part of the shipped agent.
 triage_raw.rb
 
-# Generated triage output.
+# Secrets — Gmail App Password, LLM_API_KEY, etc. NEVER commit.
+.env
+.env.*
+
+# Agent scratch workspace — per-source fragments + the generated digest.
+/sandbox/
+
+# Legacy generated output (kept ignored for older runs).
 inbox-digest.md
 inbox-digest-*.md
 
