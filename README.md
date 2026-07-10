@@ -197,7 +197,10 @@ postings) and `hey threads <id>` (one thread). Reply/drafts are never wrapped.
 ## Running
 
 ```sh
-export LLM_API_KEY=...   # for glm-5.2:cloud via Ollama Cloud (if not already set)
+exe/nexo-triage --help    # how to configure every service (Model, Apple Mail, Gmail, HEY)
+exe/nexo-triage --check    # preflight: which services are ready vs. skipped
+
+export LLM_API_KEY=...     # for glm-5.2:cloud via Ollama Cloud (if not already set)
 exe/nexo-triage
 ```
 
