@@ -134,6 +134,7 @@ class MultiInboxTriage < Nexo::Workflow
   # Runs one source agent, which writes its fragment into SANDBOX_DIR; returns the
   # fragment text (read back from disk). A failing source degrades to a note.
   def triage_source(name, klass, file)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     emit(:source_started, source: name, file: file)
     agent = klass.new(cwd: SANDBOX_DIR)
     agent.prompt(
@@ -143,13 +144,17 @@ class MultiInboxTriage < Nexo::Workflow
 
     path = File.join(SANDBOX_DIR, file)
     fragment = File.exist?(path) ? File.read(path) : "### #{name}\n\n_No fragment written._"
-    emit(:source_done, source: name, bytes: fragment.length)
+    emit(:source_done, source: name, bytes: fragment.length, ms: ms_since(started))
     fragment
   rescue => e
-    emit(:source_failed, source: name, error: e.message)
+    emit(:source_failed, source: name, error: e.message, ms: ms_since(started))
     "### #{name}\n\n_Triage failed: #{e.message}_"
   ensure
     agent&.close
+  end
+
+  def ms_since(t0)
+    ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round
   end
 
   # Mirror an agent event into the workflow log with a compact, source-tagged shape.

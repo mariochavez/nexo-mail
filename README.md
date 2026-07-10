@@ -190,9 +190,17 @@ export LLM_API_KEY=...   # for glm-5.2:cloud via Ollama Cloud (if not already se
 ruby triage.rb
 ```
 
-It prints the interleaved workflow/agent event log (per-source progress → merge),
-then the unified digest, and writes it to `./sandbox/inbox-digest.md` (per-source
-fragments land alongside it). The whole `./sandbox/` folder is git-ignored.
+You get a styled run (Charm for Ruby): a live spinner + elapsed clock while the
+three sources triage concurrently, a per-source timing summary, and the unified
+digest rendered as markdown. It's written to `./sandbox/inbox-digest.md` (per-source
+fragments land alongside it); the whole `./sandbox/` folder is git-ignored.
+
+`ruby_llm`/MCP logs are silenced by default. To see the raw HTTP/MCP trace for
+debugging:
+
+```sh
+RUBYLLM_WIRE=1 ruby triage.rb
+```
 
 ---
 

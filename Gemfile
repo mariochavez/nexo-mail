@@ -20,3 +20,8 @@ gem "net-imap"
 # Opt-in async fan-out: Nexo.concurrent runs the three source agents concurrently
 # (their LLM round-trips overlap). Soft dependency — Nexo only needs it when used.
 gem "async", "~> 2.0"
+
+# Pretty terminal output (Charm for Ruby): lipgloss styles the runner's UI,
+# glamour renders the final digest markdown. Pure Ruby, no binaries.
+gem "lipgloss"
+gem "glamour"
