@@ -228,6 +228,10 @@ RUBYLLM_WIRE=1 exe/nexo-triage
 **Classification & digest format.** Everything about *how* mail is bucketed and how
 the digest reads lives in that same SKILL.md — no Ruby changes needed.
 
+**Theme.** The terminal UI uses the [Catppuccin Mocha](https://catppuccin.com/palette)
+palette — lipgloss colors live in `exe/nexo-triage` (the `MOCHA` map) and the digest's
+markdown theme is `config/catppuccin_mocha.json`. Edit those to reskin it.
+
 ---
 
 ## Safety model

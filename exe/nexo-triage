@@ -20,20 +20,24 @@ require "optparse"
 require "lipgloss"
 require "glamour"
 
-# --- Styles -----------------------------------------------------------------
-BRAND = "#7D56F4"
-GREEN = "#04B575"
-AMBER = "#FFB454"
-GRAY  = "#6C6C6C"
+# --- Styles: Catppuccin Mocha -----------------------------------------------
+# https://catppuccin.com/palette (Mocha)
+MOCHA = {
+  mauve: "#cba6f7", green: "#a6e3a1", red: "#f38ba8", peach: "#fab387",
+  overlay1: "#7f849c", base: "#1e1e2e", text: "#cdd6f4"
+}.freeze
+
+# The Glamour markdown theme (Catppuccin Mocha), loaded from config/.
+MOCHA_STYLE = JSON.parse(File.read(File.expand_path("../config/catppuccin_mocha.json", __dir__)))
 
 module UI
   module_function
 
-  def header = Lipgloss::Style.new.bold(true).foreground("#FAFAFA").background(BRAND).padding(0, 2)
-  def brand  = Lipgloss::Style.new.foreground(BRAND).bold(true)
-  def dim    = Lipgloss::Style.new.foreground(GRAY)
-  def ok     = Lipgloss::Style.new.foreground(GREEN).bold(true)
-  def bad    = Lipgloss::Style.new.foreground(AMBER).bold(true)
+  def header = Lipgloss::Style.new.bold(true).foreground(MOCHA[:base]).background(MOCHA[:mauve]).padding(0, 2)
+  def brand  = Lipgloss::Style.new.foreground(MOCHA[:mauve]).bold(true)
+  def dim    = Lipgloss::Style.new.foreground(MOCHA[:overlay1])
+  def ok     = Lipgloss::Style.new.foreground(MOCHA[:green]).bold(true)
+  def bad    = Lipgloss::Style.new.foreground(MOCHA[:red]).bold(true)
 
   def term_width = (IO.console&.winsize&.last || 80)
 
@@ -184,7 +188,7 @@ digest = art && (art["content"] || art[:content])
 
 puts
 if digest && !digest.strip.empty?
-  puts Glamour.render(digest, style: "dark", width: [UI.term_width, 100].min)
+  puts Glamour.render_with_style(digest, MOCHA_STYLE, width: [UI.term_width, 100].min)
   puts UI.dim.render("Saved to #{File.join(SANDBOX_DIR, "inbox-digest.md")}")
 else
   puts UI.bad.render("No digest produced (run status: #{run.status}).")
