@@ -7,21 +7,21 @@ module NexoMail
   module Config
     APP = "nexo-mail"
 
-    Model = Struct.new(:alias, :provider, :model, :api_base, :api_key, keyword_init: true)
+    Model = Struct.new(:alias, :provider, :model, :api_base, :api_key)
 
     module_function
 
     # --- XDG locations --------------------------------------------------------
     def config_home = File.expand_path(env("XDG_CONFIG_HOME") || "~/.config")
-    def state_home  = File.expand_path(env("XDG_STATE_HOME") || "~/.local/state")
-    def config_dir  = File.join(config_home, APP)
+    def state_home = File.expand_path(env("XDG_STATE_HOME") || "~/.local/state")
+    def config_dir = File.join(config_home, APP)
 
     def config_file
       override = env("NEXO_MAIL_CONFIG")
       override ? File.expand_path(override) : File.join(config_dir, "config.toml")
     end
 
-    def skills_dir  = path("NEXO_MAIL_SKILLS_DIR", data["skills_dir"], File.join(config_dir, "skills"))
+    def skills_dir = path("NEXO_MAIL_SKILLS_DIR", data["skills_dir"], File.join(config_dir, "skills"))
     def prompts_dir = path("NEXO_MAIL_PROMPTS_DIR", data["prompts_dir"], File.join(config_dir, "prompts"))
     def sandbox_dir = path("NEXO_MAIL_SANDBOX_DIR", data["sandbox_dir"], File.join(state_home, APP, "sandbox"))
 

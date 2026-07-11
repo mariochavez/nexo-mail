@@ -1,0 +1,6 @@
+# https://github.com/standardrb/standard
+ruby_version: 3.3
+
+ignore:
+  - "data/**/*"      # bundled assets (JSON themes, skills, example config)
+  - "vendor/**/*"

@@ -14,6 +14,10 @@ module NexoMail
     def self.run(argv = ARGV) = new.run(argv)
 
     def run(argv)
+      # A native gem (lipgloss/glamour) sets $VERBOSE = nil on load, which turns
+      # Kernel#warn into a no-op. Restore it so our error output actually prints.
+      $VERBOSE = false if $VERBOSE.nil?
+
       Bootstrap.ensure!
 
       # Set a palette up front so --help/--check (handled during parse) can style.
@@ -29,7 +33,7 @@ module NexoMail
       configure_model!(@cli_model)
       triage
     rescue NexoMail::Error => e
-      $stderr.puts bad.render("✗ #{e.message}")
+      warn bad.render("✗ #{e.message}")
       exit 1
     end
 
@@ -79,7 +83,7 @@ module NexoMail
       end.parse!(argv)
       opts
     rescue OptionParser::ParseError => e
-      $stderr.puts "#{e.message}\nTry: nexo-triage --help"
+      warn "#{e.message}\nTry: nexo-triage --help"
       exit 1
     end
 
@@ -105,7 +109,7 @@ module NexoMail
       print "\r\e[K" # clear the spinner line
 
       if error
-        $stderr.puts bad.render("✗ Run failed: #{error.class}: #{error.message}")
+        warn bad.render("✗ Run failed: #{error.class}: #{error.message}")
         raise error
       end
 
@@ -150,8 +154,8 @@ module NexoMail
         # JSON-stringify them). Symbolize so both shapes read the same.
         d = (ev["data"] || ev[:data] || {}).transform_keys(&:to_sym)
         case (ev["type"] || ev[:type]).to_s
-        when "source_done"    then results[d[:source]] = {state: :ok, ms: d[:ms]}
-        when "source_failed"  then results[d[:source]] = {state: :failed, ms: d[:ms], detail: d[:error]}
+        when "source_done" then results[d[:source]] = {state: :ok, ms: d[:ms]}
+        when "source_failed" then results[d[:source]] = {state: :failed, ms: d[:ms], detail: d[:error]}
         when "source_skipped" then results[d[:source]] = {state: :skipped, detail: d[:reason]}
         end
       end
@@ -162,8 +166,8 @@ module NexoMail
       r ||= {state: :unknown}
       label = brand.render(name.ljust(11))
       case r[:state]
-      when :ok      then "  #{ok.render("✓")} #{label} #{dim.render(duration(r[:ms]))}"
-      when :failed  then "  #{bad.render("✗")} #{label} #{dim.render(duration(r[:ms]))}  #{bad.render("failed: #{r[:detail].to_s[0, 60]}")}"
+      when :ok then "  #{ok.render("✓")} #{label} #{dim.render(duration(r[:ms]))}"
+      when :failed then "  #{bad.render("✗")} #{label} #{dim.render(duration(r[:ms]))}  #{bad.render("failed: #{r[:detail].to_s[0, 60]}")}"
       when :skipped then "  #{dim.render("⊘")} #{label} #{dim.render("skipped — #{r[:detail]}")}"
       else "  #{dim.render("• #{name} — no result")}"
       end
@@ -188,7 +192,7 @@ module NexoMail
       return bad.render("none configured — add [[models]] to #{Config.config_file}") unless Config.model_configured?
 
       m = Config.active_model(@cli_model)
-      extra = Config.models.size > 1 ? dim.render(" (#{Config.models.size} configured)") : ""
+      extra = (Config.models.size > 1) ? dim.render(" (#{Config.models.size} configured)") : ""
       "#{ok.render(m.alias)} #{dim.render("#{m.model} · #{m.provider}")}#{extra}"
     rescue NexoMail::Error => e
       bad.render(e.message)
@@ -252,12 +256,12 @@ module NexoMail
     def ok = style.foreground(@palette[:green]).bold(true)
     def bad = style.foreground(@palette[:red]).bold(true)
 
-    def term_width = (IO.console&.winsize&.last || 80)
+    def term_width = IO.console&.winsize&.last || 80
     def clock(seconds) = format("%02d:%02d", (seconds / 60).to_i, (seconds % 60).to_i)
 
     def duration(ms)
       ms = ms.to_i
-      ms < 1000 ? "#{ms}ms" : format("%.1fs", ms / 1000.0)
+      (ms < 1000) ? "#{ms}ms" : format("%.1fs", ms / 1000.0)
     end
 
     def section(title) = puts("\n#{brand.render(title)}")

@@ -14,8 +14,8 @@ module NexoMail
       # name => [agent class, fragment filename]
       SOURCES = {
         "Apple Mail" => [Agents::AppleMailSource, "apple-mail.md"],
-        "Gmail"      => [Agents::GmailSource, "gmail.md"],
-        "HEY"        => [Agents::HeySource, "hey.md"]
+        "Gmail" => [Agents::GmailSource, "gmail.md"],
+        "HEY" => [Agents::HeySource, "hey.md"]
       }.freeze
 
       DIGEST_FILE = "inbox-digest.md"

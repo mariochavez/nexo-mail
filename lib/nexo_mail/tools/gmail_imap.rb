@@ -18,7 +18,7 @@ module NexoMail
       # tears the connection down. Returns the block's value, or an { error: } hash
       # (recoverable) on a missing credential / login / network fault.
       def with_inbox
-        address  = Config.gmail_address.to_s
+        address = Config.gmail_address.to_s
         password = Config.gmail_app_password.to_s.gsub(/\s+/, "")
         if address.empty? || password.empty?
           return {error: "Gmail is not configured — set [services.gmail] in config.toml or NEXO_MAIL_GMAIL_*"}
@@ -30,8 +30,16 @@ module NexoMail
           imap.examine("INBOX") # READ-ONLY select — cannot set \Seen, move, or delete
           yield imap
         ensure
-          imap.logout rescue nil
-          imap.disconnect rescue nil
+          begin
+            imap.logout
+          rescue
+            nil
+          end
+          begin
+            imap.disconnect
+          rescue
+            nil
+          end
         end
       rescue Net::IMAP::NoResponseError => e
         {error: "Gmail IMAP login failed: #{e.message} — check the App Password and that IMAP is enabled"}

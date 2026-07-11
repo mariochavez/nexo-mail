@@ -1,0 +1,13 @@
+# Run Standard's rules via RuboCop (for editors / LSP that drive `rubocop`).
+# Source: https://github.com/standardrb/standard#running-standard-rules-via-rubocop
+# The canonical config is .standard.yml; this just points RuboCop at Standard.
+require:
+  - standard
+  - standard-custom
+  - standard-performance
+  - rubocop-performance
+
+inherit_gem:
+  standard: config/base.yml
+  standard-custom: config/base.yml
+  standard-performance: config/base.yml

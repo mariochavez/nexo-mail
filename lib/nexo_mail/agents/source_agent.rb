@@ -8,9 +8,9 @@ module NexoMail
     # fragment there; mail access stays read-only. The model/provider is injected
     # at runtime from the selected config model (see .configure_model!).
     class SourceAgent < Nexo::Agent
-      sandbox     :local
+      sandbox :local
       permissions Nexo::Permissions.new(mode: :read_only, allow: NexoMail::SANDBOX_WRITE)
-      skills      :email_triage
+      skills :email_triage
 
       instructions <<~TXT
         You triage ONE email inbox with the attached email_triage skill: read recent
