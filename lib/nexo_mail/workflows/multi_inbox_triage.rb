@@ -28,18 +28,7 @@ module NexoMail
 
         fragments = available.keys.zip(fan_out_sources(available)).to_h
 
-        if fragments.empty?
-          merged = "# Inbox Digest\n\n_No sources available._\n" +
-            skipped.map { |name, reason| "- **#{name}** skipped: #{reason}" }.join("\n")
-        else
-          emit(:merging, sources: fragments.keys)
-          Agents::MergeDigests.new(cwd: sandbox_dir).prompt(merge_prompt(fragments), max_turns: 6) do |type, payload|
-            forward_event("merge", type, payload)
-          end
-          digest_path = File.join(sandbox_dir, DIGEST_FILE)
-          merged = File.exist?(digest_path) ? File.read(digest_path) : "_Merge produced no #{DIGEST_FILE}._"
-        end
-
+        merged = fragments.empty? ? no_sources_digest(skipped) : merge(fragments)
         artifact(DIGEST_FILE, content: merged)
         {sources: fragments.keys, skipped: skipped, bytes: merged.length}
       end
@@ -47,6 +36,31 @@ module NexoMail
       private
 
       def sandbox_dir = Config.sandbox_dir
+
+      # Run the merge agent to unify the fragments. If it fails (e.g. the model is
+      # down), the run must NOT die and lose the per-source work — fall back to the
+      # concatenated fragments so a digest is always produced.
+      def merge(fragments)
+        emit(:merging, sources: fragments.keys)
+        Agents::MergeDigests.new(cwd: sandbox_dir).prompt(merge_prompt(fragments), max_turns: 6) do |type, payload|
+          forward_event("merge", type, payload)
+        end
+        digest_path = File.join(sandbox_dir, DIGEST_FILE)
+        File.exist?(digest_path) ? File.read(digest_path) : fallback_digest(fragments)
+      rescue => e
+        emit(:merge_failed, error: e.message)
+        fallback_digest(fragments)
+      end
+
+      def fallback_digest(fragments)
+        "# Inbox Digest\n\n_(merge unavailable — showing per-source digests)_\n\n" +
+          fragments.map { |name, frag| "## #{name}\n\n#{frag}" }.join("\n\n")
+      end
+
+      def no_sources_digest(skipped)
+        "# Inbox Digest\n\n_No sources available._\n" +
+          skipped.map { |name, reason| "- **#{name}** skipped: #{reason}" }.join("\n")
+      end
 
       # Split SOURCES into the ones that can run now and the ones to skip (with a
       # reason), using each source's preflight availability check. This is what keeps

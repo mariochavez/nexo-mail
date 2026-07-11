@@ -1,6 +1,19 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# Runnable both from a source checkout and when installed as a gem.
+lib = File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift(lib) if File.directory?(lib) && !$LOAD_PATH.include?(lib)
+
+# In a source checkout (a Gemfile sits next to lib/), boot Bundler so the gem's
+# dependencies resolve. Installed as a gem there's no Gemfile — RubyGems activates
+# the dependencies from the gemspec instead, so this is skipped.
+gemfile = File.expand_path("../Gemfile", __dir__)
+if File.exist?(gemfile)
+  ENV["BUNDLE_GEMFILE"] ||= gemfile
+  require "bundler/setup"
+end
+
 require "nexo_mail"
 
 NexoMail::CLI.run(ARGV)

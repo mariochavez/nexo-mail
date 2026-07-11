@@ -48,8 +48,8 @@ harness is the rest.
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
-│  MODEL              ruby_llm → Ollama (OpenAI-compatible /v1)     │
-│    glm-5.2:cloud    (LLM_API_BASE / LLM_API_KEY / LLM_MODEL)      │
+│  MODEL              ruby_llm, any provider (ollama/openai/…)      │
+│    the active [[models]] entry from config.toml (--model / first) │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -82,9 +82,12 @@ instead, so it needs no override.
 3. A source that raises is caught → its fragment becomes a visible "Triage failed"
    note; the other sources still run.
 4. The fragments are handed to the **merge agent**, which pools "needs action"
-   across sources, applies the VIP rules, and **writes** `./sandbox/inbox-digest.md`.
+   across sources, applies the VIP rules, and **writes** the digest. If the merge
+   itself fails (e.g. the model is down), the run falls back to concatenating the
+   per-source fragments so a digest is always produced — a merge failure never
+   discards the source work.
 5. The workflow reads that file back and records it as an **artifact**;
-   `exe/nexo-triage` prints it.
+   `exe/nexo-triage` prints the per-source outcome summary (`✓`/`✗`/`⊘`) and the digest.
 
 Sources are **preflight-checked** before step 2: one whose binary is missing or
 whose credentials are absent is skipped (with a reason) and never enters the fan-out;

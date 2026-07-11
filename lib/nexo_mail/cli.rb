@@ -56,7 +56,7 @@ module NexoMail
     # Point RubyLLM + Nexo at the selected model. Only one model is active per run,
     # so global mutation is correct (no ruby_llm Context needed).
     def configure_model!(cli_alias)
-      model = Config.active_model(cli_alias)
+      model = @active_model = Config.active_model(cli_alias)
       RubyLLM.configure do |c|
         base_setter = "#{model.provider}_api_base="
         key_setter = "#{model.provider}_api_key="
@@ -88,6 +88,7 @@ module NexoMail
     def triage
       puts
       puts header.render("Nexo Mail Agent — Apple Mail · Gmail · HEY")
+      puts "  #{dim.render("model: #{@active_model.alias} · #{@active_model.model} (#{@active_model.provider})")}"
       puts
 
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -144,11 +145,14 @@ module NexoMail
     def outcomes(run)
       results = {}
       Nexo::Workflow.logs(run.id) do |ev|
-        d = ev["data"] || {}
-        case ev["type"]
-        when "source_done"    then results[d["source"]] = {state: :ok, ms: d["ms"]}
-        when "source_failed"  then results[d["source"]] = {state: :failed, ms: d["ms"], detail: d["error"]}
-        when "source_skipped" then results[d["source"]] = {state: :skipped, detail: d["reason"]}
+        # emit() stores the data hash with the keys it was called with (symbols
+        # here); the in-memory store returns them verbatim (a persisted store would
+        # JSON-stringify them). Symbolize so both shapes read the same.
+        d = (ev["data"] || ev[:data] || {}).transform_keys(&:to_sym)
+        case (ev["type"] || ev[:type]).to_s
+        when "source_done"    then results[d[:source]] = {state: :ok, ms: d[:ms]}
+        when "source_failed"  then results[d[:source]] = {state: :failed, ms: d[:ms], detail: d[:error]}
+        when "source_skipped" then results[d[:source]] = {state: :skipped, detail: d[:reason]}
         end
       end
       results
