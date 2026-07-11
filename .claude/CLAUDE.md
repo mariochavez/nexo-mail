@@ -32,7 +32,7 @@ lib/nexo_mail/
   theme.rb                  # Catppuccin palettes (lipgloss) + Glamour styles
   cli.rb                    # NexoMail::CLI — the runner (OptionParser + UI)
   agents/                   # SourceAgent + AppleMail/Gmail/Hey source + MergeDigests
-  tools/                    # CliReader, HeyImbox/Thread, GmailImap(::List/::Read), Gws*
+  tools/                    # CliReader, HeyImbox/Thread, GmailImap(::List/::Read)
   workflows/                # MultiInboxTriage < Nexo::Workflow
 data/                       # PACKAGED assets: config.example.toml, skills/, themes/, prompts/
 exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)

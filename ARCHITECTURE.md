@@ -126,7 +126,7 @@ one that errors mid-run degrades to a "failed" note. The run always continues.
 | Agents | `lib/nexo_mail/agents/*.rb` |
 | Knowledge | bundled `data/skills/email_triage/SKILL.md`, seeded to the XDG skills dir |
 | Integration — Gmail (IMAP) | `lib/nexo_mail/tools/gmail_imap.rb` + `gmail_imap/` |
-| Integration — HEY / gws (CLI) | `lib/nexo_mail/tools/hey_*.rb`, `gws_*.rb`, `cli_reader.rb` |
+| Integration — HEY (CLI) | `lib/nexo_mail/tools/hey_*.rb`, `cli_reader.rb` |
 | Integration — Apple Mail (MCP) | `mcp :mail` macro in `lib/nexo_mail/agents/apple_mail_source.rb` |
 | Config / boot | `lib/nexo_mail/{config,bootstrap,theme}.rb`, `lib/nexo_mail.rb` (Zeitwerk) |
 

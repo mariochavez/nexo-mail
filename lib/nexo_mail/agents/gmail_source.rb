@@ -2,8 +2,7 @@
 
 module NexoMail
   module Agents
-    # Gmail — reached read-only over IMAP with an App Password (no gcloud/gws).
-    # To use the `gws` OAuth CLI instead, swap in [Tools::GwsGmailUnread, Tools::GwsGmailRead].
+    # Gmail — reached read-only over IMAP with an App Password (no gcloud/OAuth).
     class GmailSource < SourceAgent
       def self.source_tools = [Tools::GmailImap::List, Tools::GmailImap::Read]
 
