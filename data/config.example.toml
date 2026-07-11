@@ -1,0 +1,57 @@
+# Nexo Mail Agent configuration.
+#
+# Precedence for every setting:  NEXO_MAIL_* env var  >  this file  >  built-in default.
+# Any string value may reference an env var:  "${VAR}"  or  "${VAR:-fallback}".
+#
+# This file was created on first run. Edit it, then run `nexo-triage`.
+
+# ── Models ──────────────────────────────────────────────────────────────────
+# There is NO default model. Define one or more [[models]]; the FIRST is used
+# unless you pass  `nexo-triage --model <alias>`  (or set NEXO_MAIL_MODEL=<alias>).
+#
+# Each model needs: an alias, a provider ruby_llm knows (ollama, openai,
+# anthropic, gemini, mistral, deepseek, azure, …), the model id, and optional
+# api_base / api_key for that provider. Uncomment and edit:
+#
+# [[models]]
+# alias    = "local"
+# provider = "ollama"
+# model    = "llama3.1"
+# api_base = "http://localhost:11434/v1"
+# api_key  = ""
+#
+# [[models]]
+# alias    = "glm-cloud"
+# provider = "ollama"
+# model    = "glm-5.2:cloud"
+# api_base = "https://ollama.com/v1"
+# api_key  = "${OLLAMA_API_KEY}"
+
+# ── Services ────────────────────────────────────────────────────────────────
+[services.gmail]
+# Read-only IMAP with an App Password (no gcloud). See `nexo-triage --help`.
+address      = "${GMAIL_ADDRESS}"
+app_password = "${GMAIL_APP_PASSWORD}"
+
+[services.apple_mail]
+# The local apple-mail-mcp server (must be on PATH and indexed).
+mcp_command = "apple-mail-mcp"
+
+[services.hey]
+# HEY uses the `hey` CLI's own auth (keyring); nothing to set here.
+
+# ── Theme ───────────────────────────────────────────────────────────────────
+[theme]
+# Catppuccin flavor for the terminal UI and the digest markdown.
+# One of: latte (light), frappe, macchiato, mocha (dark).
+flavor = "mocha"
+
+# ── Paths (optional) ────────────────────────────────────────────────────────
+# Defaults follow XDG:
+#   sandbox_dir : $XDG_STATE_HOME/nexo-mail/sandbox   (~/.local/state/nexo-mail/sandbox)
+#   skills_dir  : $XDG_CONFIG_HOME/nexo-mail/skills    (~/.config/nexo-mail/skills)
+#   prompts_dir : $XDG_CONFIG_HOME/nexo-mail/prompts   (~/.config/nexo-mail/prompts)
+# Uncomment to override:
+# sandbox_dir = "~/nexo-mail/sandbox"
+# skills_dir  = "~/nexo-mail/skills"
+# prompts_dir = "~/nexo-mail/prompts"

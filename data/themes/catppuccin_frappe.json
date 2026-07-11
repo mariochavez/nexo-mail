@@ -1,0 +1,117 @@
+{
+  "document": {
+    "block_prefix": "\n",
+    "block_suffix": "\n",
+    "color": "#c6d0f5",
+    "margin": 2
+  },
+  "block_quote": {
+    "color": "#a5adce",
+    "italic": true,
+    "indent": 1,
+    "indent_token": "│ "
+  },
+  "paragraph": {},
+  "list": {
+    "level_indent": 2
+  },
+  "heading": {
+    "block_suffix": "\n",
+    "color": "#ca9ee6",
+    "bold": true
+  },
+  "h1": {
+    "prefix": " ",
+    "suffix": " ",
+    "color": "#303446",
+    "background_color": "#ca9ee6",
+    "bold": true
+  },
+  "h2": {
+    "prefix": "▌ ",
+    "color": "#8caaee",
+    "bold": true
+  },
+  "h3": {
+    "prefix": "▌ ",
+    "color": "#81c8be",
+    "bold": true
+  },
+  "h4": {
+    "prefix": "▌ ",
+    "color": "#a6d189",
+    "bold": true
+  },
+  "h5": {
+    "prefix": "▌ ",
+    "color": "#e5c890",
+    "bold": true
+  },
+  "h6": {
+    "prefix": "▌ ",
+    "color": "#ef9f76",
+    "bold": false
+  },
+  "text": {},
+  "strikethrough": {
+    "crossed_out": true
+  },
+  "emph": {
+    "color": "#f4b8e4",
+    "italic": true
+  },
+  "strong": {
+    "color": "#ef9f76",
+    "bold": true
+  },
+  "hr": {
+    "color": "#626880",
+    "format": "\n─────────\n"
+  },
+  "item": {
+    "block_prefix": "• "
+  },
+  "enumeration": {
+    "block_prefix": ". "
+  },
+  "task": {
+    "ticked": "[✓] ",
+    "unticked": "[ ] "
+  },
+  "link": {
+    "color": "#8caaee",
+    "underline": true
+  },
+  "link_text": {
+    "color": "#babbf1",
+    "bold": true
+  },
+  "image": {
+    "color": "#8caaee",
+    "underline": true
+  },
+  "image_text": {
+    "color": "#a5adce",
+    "format": "Image: {{.text}} →"
+  },
+  "code": {
+    "prefix": " ",
+    "suffix": " ",
+    "color": "#a6d189",
+    "background_color": "#414559"
+  },
+  "code_block": {
+    "color": "#c6d0f5",
+    "margin": 2
+  },
+  "table": {
+    "center_separator": "┼",
+    "column_separator": "│",
+    "row_separator": "─"
+  },
+  "definition_list": {},
+  "definition_term": {},
+  "definition_description": {
+    "block_prefix": "\n🠶 "
+  }
+}

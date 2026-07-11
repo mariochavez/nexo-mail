@@ -1,19 +1,15 @@
-# Raw ruby_llm comparison spike — not part of the shipped agent.
-triage_raw.rb
-
-# Secrets — Gmail App Password, LLM_API_KEY, etc. NEVER commit.
+# Secrets — Gmail App Password, API keys, etc. NEVER commit.
 .env
 .env.*
 
-# Agent scratch workspace — per-source fragments + the generated digest.
+# The real runtime sandbox lives under $XDG_STATE_HOME; this only catches a
+# stale local copy from earlier dev runs.
 /sandbox/
 
-# Legacy generated output (kept ignored for older runs).
-inbox-digest.md
-inbox-digest-*.md
-
-# Ruby / bundler
+# Ruby / bundler / gem build
+Gemfile.lock
 /.bundle/
 /vendor/bundle/
+/pkg/
 *.gem
 .DS_Store

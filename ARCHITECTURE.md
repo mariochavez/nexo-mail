@@ -35,7 +35,7 @@ harness is the rest.
 └─────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────┐
-│  KNOWLEDGE          app/skills/email_triage/SKILL.md             │
+│  KNOWLEDGE          skills/email_triage/SKILL.md (XDG, seeded)   │
 │    buckets (Action/FYI/Noise), digest template, VIP senders,    │
 │    injected into every agent as system prompt                   │
 └─────────────────────────────────────────────────────────────────┘
@@ -63,8 +63,8 @@ agent."
 | Service | Pattern | Where | Read-only because… |
 |---------|---------|-------|--------------------|
 | Apple Mail | **MCP** | `mcp :mail` macro in `AppleMailSource` | Nexo's MCP gate is fail-closed; only `MAIL_READ_TOOLS` are allowed |
-| Gmail | **IMAP tools** | `app/tools/gmail_imap/` (`List`, `Read`) | mailbox opened with `EXAMINE`; `BODY.PEEK` doesn't set flags |
-| HEY | **CLI-wrapper tools** | `app/tools/hey_imbox.rb`, `hey_thread.rb` | argv arrays (no shell) to hardcoded read subcommands |
+| Gmail | **IMAP tools** | `lib/nexo_mail/tools/gmail_imap/` (`List`, `Read`) | mailbox opened with `EXAMINE`; `BODY.PEEK` doesn't set flags |
+| HEY | **CLI-wrapper tools** | `lib/nexo_mail/tools/hey_imbox.rb`, `hey_thread.rb` | argv arrays (no shell) to hardcoded read subcommands |
 
 `GmailSource`/`HeySource` attach their tools by overriding `Nexo::Agent#chat`
 (calling `super`, then `with_tools(...)`). `AppleMailSource` uses the `mcp` macro
@@ -118,11 +118,22 @@ one that errors mid-run degrades to a "failed" note. The run always continues.
 
 | Layer | File |
 |-------|------|
-| Entry point | `exe/nexo-triage` |
-| Orchestration | `app/workflows/multi_inbox_triage.rb` |
-| Agents | `app/agents/*.rb` |
-| Knowledge | `app/skills/email_triage/SKILL.md` |
-| Integration — Gmail (IMAP) | `app/tools/gmail_imap.rb` + `app/tools/gmail_imap/` |
-| Integration — HEY / gws (CLI) | `app/tools/hey_*.rb`, `app/tools/gws_*.rb`, `app/tools/cli_reader.rb` |
-| Integration — Apple Mail (MCP) | `mcp :mail` macro in `app/agents/apple_mail_source.rb` |
-| Boot / shared config | `config/environment.rb` |
+| Entry point | `exe/nexo-triage` → `NexoMail::CLI` (`lib/nexo_mail/cli.rb`) |
+| Orchestration | `lib/nexo_mail/workflows/multi_inbox_triage.rb` |
+| Agents | `lib/nexo_mail/agents/*.rb` |
+| Knowledge | bundled `data/skills/email_triage/SKILL.md`, seeded to the XDG skills dir |
+| Integration — Gmail (IMAP) | `lib/nexo_mail/tools/gmail_imap.rb` + `gmail_imap/` |
+| Integration — HEY / gws (CLI) | `lib/nexo_mail/tools/hey_*.rb`, `gws_*.rb`, `cli_reader.rb` |
+| Integration — Apple Mail (MCP) | `mcp :mail` macro in `lib/nexo_mail/agents/apple_mail_source.rb` |
+| Config / boot | `lib/nexo_mail/{config,bootstrap,theme}.rb`, `lib/nexo_mail.rb` (Zeitwerk) |
+
+## Config layer (XDG)
+
+Everything runtime-configurable comes from `NexoMail::Config`, which reads a TOML
+file at `$XDG_CONFIG_HOME/nexo-mail/config.toml` (created on first run by
+`NexoMail::Bootstrap`). Precedence is **`NEXO_MAIL_*` env > config.toml > default**,
+and any string value supports `${VAR}` interpolation. The config supplies the
+model(s) (no default — first used unless `--model`), service credentials, the theme
+flavor, the sandbox/skills/prompts dirs, and per-agent prompt fragments. Because
+only one model runs per invocation, the CLI configures `ruby_llm` globally from the
+selected model rather than per-chat contexts.
