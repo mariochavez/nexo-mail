@@ -45,8 +45,10 @@ lib/nexo_mail/
   theme.rb                  # Catppuccin palettes (lipgloss) + Glamour styles
   cli.rb                    # NexoMail::CLI — the runner (OptionParser + UI, thin)
   snapshots.rb              # NexoMail::Snapshots — create/list/prune (used by tools)
-  agents/                   # SourceAgent base + AppleMail/Gmail/Hey source,
-                            #   Synthesize (digest), Publisher (dashboard), Archivist
+  sources.rb                # NexoMail::Sources — the source catalog (descriptors)
+  agents/                   # SourceAgent base + EmailSource (data-driven, tool-based
+                            #   Gmail/HEY) + AppleMailSource (MCP), Synthesize (digest),
+                            #   Publisher (dashboard), Archivist
   tools/                    # CliReader, HeyBox/HeyThread, GmailImap(::List/::Read),
                             #   ArchiveRun, PruneSnapshots
   workflows/                # MultiInboxTriage < Nexo::Workflow (orchestration only)
@@ -61,7 +63,11 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
 
 1. **Source agents** (AppleMail/Gmail/HEY, parallel) extract each inbox → a
    structured JSON array file (`gmail.json`, …). Skills: `email_triage`,
-   `financial_summary`, `interest_radar`.
+   `financial_summary`, `interest_radar`. The workflow walks `NexoMail::Sources.all`
+   — one **descriptor** per source (name, file, `prompt_key`, tools, availability).
+   Tool-based sources (Gmail, HEY) share ONE `Agents::EmailSource` built from a
+   descriptor; adding such a service is a descriptor, not a class. Apple Mail keeps
+   its own `AppleMailSource` because its `mcp` macro is class-level.
 2. **Synthesize** reads those files → writes `digest.json` + `inbox-digest.md`:
    merge, **cross-source dedupe**, money rollups, schedule, stories, per-person
    detail, topic briefings. Skills: `inbox_synthesis`, `financial_summary`,
@@ -107,8 +113,11 @@ parses no JSON, renders nothing.
   `skills` *macro only accumulates* — so `skills :x` would ADD to the inherited
   extraction skills instead of replacing them. `instructions`, by contrast, replaces.
 - **`SourceAgent.configure_model!` has a hardcoded roster** of every triage class
-  (`[SourceAgent, …source…, Synthesize, Publisher, Archivist]`). Add any NEW agent
-  class here or it runs with no model/provider set.
+  (`[SourceAgent, EmailSource, AppleMailSource, Synthesize, Publisher, Archivist]`).
+  Add any NEW agent CLASS here or it runs with no model/provider set. A new
+  tool-based *source* adds only a `Sources` descriptor — no class, so the roster
+  stays fixed; a new agent class (or an MCP source like Apple Mail) still needs a
+  roster entry.
 - **Custom `source_tools` are NOT gated by Nexo permissions** (only the built-in
   sandbox tools + MCP allow-list are). `HeyBox`, `GmailImap`, `ArchiveRun`,
   `PruneSnapshots` run as plain `RubyLLM::Tool`s — their safety is your job

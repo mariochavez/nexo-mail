@@ -27,7 +27,7 @@ module NexoMail
       # synthesis), so the `inherited`-copy timing is a non-issue. Called by the CLI
       # after config is loaded, before any agent is instantiated.
       def self.configure_model!(model)
-        [SourceAgent, AppleMailSource, GmailSource, HeySource, Synthesize, Publisher, Archivist].each do |klass|
+        [SourceAgent, EmailSource, AppleMailSource, Synthesize, Publisher, Archivist].each do |klass|
           klass.model model.model
           klass.provider model.provider.to_sym
           klass.assume_model_exists true
@@ -41,6 +41,13 @@ module NexoMail
       # The prompt-fragment key (<prompts_dir>/<key>.md) appended to this agent's
       # instructions. nil on the base; concrete sources override.
       def self.prompt_key = nil
+
+      # Instance-level views of the two per-source inputs #chat wires. They default
+      # to the class macros (so AppleMailSource/Synthesize/Publisher/Archivist keep
+      # their class-level declarations), but EmailSource overrides them to read a
+      # per-instance descriptor — that's how one class serves many tool-based sources.
+      def source_tools = self.class.source_tools
+      def prompt_key = self.class.prompt_key
 
       # Preflight availability check. Returns nil when the source can run, or a short
       # reason string when it cannot (missing binary/credentials). The workflow skips
@@ -60,9 +67,9 @@ module NexoMail
       # are additive). A `common` fragment applies to every agent, plus a per-agent one.
       def chat(base: nil)
         chat = super
-        tools = self.class.source_tools.map(&:new)
+        tools = source_tools.map(&:new)
         chat.with_tools(*tools) unless tools.empty?
-        [Config.prompt_fragment("common"), Config.prompt_fragment(self.class.prompt_key)]
+        [Config.prompt_fragment("common"), Config.prompt_fragment(prompt_key)]
           .compact.each { |fragment| chat.with_instructions(fragment, append: true) }
         chat
       end

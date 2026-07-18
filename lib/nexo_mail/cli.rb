@@ -133,7 +133,7 @@ module NexoMail
 
     def report(run, total)
       results = outcomes(run)
-      Workflows::MultiInboxTriage::SOURCES.each_key { |name| puts source_line(name, results[name]) }
+      Sources.all.each { |descriptor| puts source_line(descriptor.name, results[descriptor.name]) }
       puts "  #{dim.render("─" * 24)}"
       puts "  #{brand.render("total".ljust(13))}#{dim.render(clock(total))}"
 
@@ -198,10 +198,10 @@ module NexoMail
       puts header.render("Nexo Mail Agent — preflight")
       puts
       puts "  #{brand.render("model".ljust(11))} #{model_check}"
-      Workflows::MultiInboxTriage::SOURCES.each do |name, (klass, _)|
-        reason = klass.availability
+      Sources.all.each do |descriptor|
+        reason = descriptor.available?
         status = reason ? "#{dim.render("⊘")} #{dim.render(reason)}" : ok.render("✓ ready")
-        puts "  #{brand.render(name.ljust(11))} #{status}"
+        puts "  #{brand.render(descriptor.name.ljust(11))} #{status}"
       end
       puts
       exit 0

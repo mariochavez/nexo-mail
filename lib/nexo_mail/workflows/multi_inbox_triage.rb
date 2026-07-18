@@ -17,13 +17,6 @@ module NexoMail
     # that errors mid-run degrades to "no file"; and each later stage is best-effort,
     # so a failing synthesis/publisher/archivist never sinks the whole run.
     class MultiInboxTriage < Nexo::Workflow
-      # display name => [agent class, extraction filename]
-      SOURCES = {
-        "Apple Mail" => [Agents::AppleMailSource, "apple-mail.json"],
-        "Gmail" => [Agents::GmailSource, "gmail.json"],
-        "HEY" => [Agents::HeySource, "hey.json"]
-      }.freeze
-
       def call(payload)
         stamp = (payload || {})[:generated_at] || Time.now.utc
 
@@ -46,30 +39,33 @@ module NexoMail
       # ---- stage 1: source extraction (parallel) -------------------------------
 
       # Triage the available sources concurrently — their LLM round-trips overlap in
-      # one async reactor. Each writes its own file, so no write contention. Returns
-      # { display name => filename } for the sources that actually wrote a file.
-      # Falls back to sequential when `async` is absent.
+      # one async reactor. Each writes its own file, so no write contention. Takes a
+      # { display name => descriptor } hash; returns { name => filename } for the
+      # sources that actually wrote a file. Falls back to sequential when `async` is
+      # absent.
       def fan_out_sources(sources)
         return {} if sources.empty?
 
         pairs =
           begin
             Nexo.concurrent(max_in_flight: sources.size) do |c|
-              sources.each { |name, (klass, file)| c.add { extract_source(name, klass, file) } }
+              sources.each_value { |descriptor| c.add { extract_source(descriptor) } }
             end
           rescue Nexo::MissingDependencyError => e
             emit(:async_unavailable, error: e.message)
-            sources.map { |name, (klass, file)| extract_source(name, klass, file) }
+            sources.values.map { |descriptor| extract_source(descriptor) }
           end
         pairs.compact.to_h
       end
 
       # Run one source agent to write its extraction file. Returns [name, file] when
       # the file was written, else nil (a failed source drops out). Never raises.
-      def extract_source(name, klass, file)
+      def extract_source(descriptor)
         started = clock
+        name = descriptor.name
+        file = descriptor.file
         emit(:source_started, source: name, file: file)
-        agent = klass.new(cwd: Config.sandbox_dir)
+        agent = descriptor.build(cwd: Config.sandbox_dir)
         agent.prompt(
           "Triage this inbox per the skills, then write the JSON array of items to " \
           "the file `#{file}` in the workspace.",
@@ -136,17 +132,17 @@ module NexoMail
       def partition_sources
         available = {}
         skipped = {}
-        SOURCES.each do |name, (klass, file)|
-          reason = safe_availability(klass)
-          reason ? (skipped[name] = reason) : (available[name] = [klass, file])
+        Sources.all.each do |descriptor|
+          reason = safe_availability(descriptor)
+          reason ? (skipped[descriptor.name] = reason) : (available[descriptor.name] = descriptor)
         end
         [available, skipped]
       end
 
-      def safe_availability(klass)
-        klass.availability
+      def safe_availability(descriptor)
+        descriptor.available?
       rescue => e
-        emit(:availability_check_failed, source: klass.name, error: e.message)
+        emit(:availability_check_failed, source: descriptor.name, error: e.message)
         nil
       end
 
