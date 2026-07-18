@@ -42,7 +42,8 @@ all archived to a timestamped snapshot.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  AGENTS  (Nexo::Agent)                                                  │
 │    SourceAgent (base: model · :local sandbox · :read_only+write)       │
-│      ├─ AppleMailSource   ├─ GmailSource   ├─ HeySource   → extract     │
+│      ├─ EmailSource (Gmail·HEY, from a Sources descriptor)             │
+│      └─ AppleMailSource (MCP)              → extract                   │
 │    Synthesize  → digest.json + inbox-digest.md                         │
 │    Publisher   → dashboard.html   (+ :shell, to run the render script)  │
 │    Archivist   → snapshot + prune (via tools)                          │
@@ -73,10 +74,10 @@ all archived to a timestamped snapshot.
 ## The pipeline — four stages
 
 ```
-   ┌── AppleMailSource ──┐
-   ├── GmailSource ──────┤   1. EXTRACT (parallel)   → apple-mail.json
-   └── HeySource ────────┘      each writes a JSON      gmail.json · hey.json
-                                array of items
+   ┌── AppleMailSource (MCP) ──┐
+   ├── EmailSource · Gmail ────┤   1. EXTRACT (parallel)   → apple-mail.json
+   └── EmailSource · HEY ──────┘      each writes a JSON      gmail.json · hey.json
+                                     array of items
                     │
               Synthesize          2. BUILD THE DIGEST   → digest.json
                                     merge · dedupe ·       + inbox-digest.md
@@ -106,8 +107,12 @@ converge to the same abstraction the agent sees: **a tool it can call.**
 | Gmail | **IMAP tools** | `tools/gmail_imap/{list,read}.rb` | mailbox opened with `EXAMINE`; `BODY.PEEK` sets no flags |
 | HEY | **CLI-wrapper tools** | `tools/hey_box.rb`, `hey_thread.rb` | argv arrays (no shell) to hardcoded read subcommands |
 
-`GmailSource`/`HeySource` attach their tools by overriding `Nexo::Agent#chat`
-(`super`, then `with_tools(...)`). `AppleMailSource` uses the `mcp` macro instead.
+Gmail and HEY are **tool-based** sources: they share **one** `EmailSource` agent
+that reads its tools + prompt key from a `NexoMail::Sources` **descriptor**, so
+adding another IMAP/CLI-style service is a descriptor, not a class. `SourceAgent`
+attaches the descriptor's tools in `#chat` (`super`, then `with_tools(...)`).
+Apple Mail keeps its own `AppleMailSource` because the `mcp` macro is class-level
+and can't be expressed per-instance.
 
 **HEY has three boxes**, and `HeyBox` takes a `box` param so the agent pulls all
 three: **Imbox** (people → action/fyi), **The Feed** (newsletters → tag topics),
@@ -152,7 +157,7 @@ XSS-safe, and restyling means editing the template — never the app's Ruby.
 - **One scoped shell exception.** The **Publisher alone** also gets `:shell`, purely
   to run the render script — it attaches no mail tools and reads only the
   already-produced `digest.json`. Every mail-reading agent stays `:read_only` with
-  no shell (`GmailSource.permissions.authorize!(:shell)` raises; the Publisher's
+  no shell (`AppleMailSource.permissions.authorize!(:shell)` raises; the Publisher's
   does not).
 - **Bounded destructive tools.** `PruneSnapshots` deletes only inside the snapshots
   dir; the agent decides *to* prune, the tool does the deletion deterministically.
@@ -196,7 +201,7 @@ Publisher only                 Permissions.new(mode: :read_only, allow: %i[read 
 **Blast radius, stated plainly:** an LLM now holds a sandboxed shell, scoped to an
 agent with no mail access, reading only derived data, running a fixed script.
 Every inbox-touching agent stays strictly read-only — verify with
-`GmailSource.permissions.authorize!(:shell)` (raises) vs the Publisher's (does not).
+`AppleMailSource.permissions.authorize!(:shell)` (raises) vs the Publisher's (does not).
 
 ## Why this shape
 
@@ -219,7 +224,8 @@ Every inbox-touching agent stays strictly read-only — verify with
 |-------|------|
 | Entry point | `exe/nexo-triage` → `NexoMail::CLI` (`lib/nexo_mail/cli.rb`) |
 | Orchestration | `lib/nexo_mail/workflows/multi_inbox_triage.rb` |
-| Agents | `lib/nexo_mail/agents/*.rb` (source ×3, `synthesize`, `publisher`, `archivist`) |
+| Source catalog | `lib/nexo_mail/sources.rb` (`Sources.all` — one descriptor per service) |
+| Agents | `lib/nexo_mail/agents/*.rb` (`source_agent` base, `email_source`, `apple_mail_source`, `synthesize`, `publisher`, `archivist`) |
 | Skills | `data/skills/*/SKILL.md` (+ `dashboard_designer/{assets,scripts}`), seeded to XDG |
 | Integration — Gmail (IMAP) | `lib/nexo_mail/tools/gmail_imap.rb` + `gmail_imap/` |
 | Integration — HEY (CLI) | `lib/nexo_mail/tools/hey_box.rb`, `hey_thread.rb`, `cli_reader.rb` |
