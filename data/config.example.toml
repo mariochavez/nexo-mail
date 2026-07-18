@@ -46,12 +46,33 @@ mcp_command = "apple-mail-mcp"
 # One of: latte (light), frappe, macchiato, mocha (dark).
 flavor = "mocha"
 
+# ── Snapshots ───────────────────────────────────────────────────────────────
+# Every run archives its artifacts (digest.json, dashboard.html, inbox-digest.md)
+# into a timestamped snapshot. `nexo-triage --prune-snapshots` trims the history.
+# snapshots_keep = 20
+
+# ── Dashboard ───────────────────────────────────────────────────────────────
+# The Publisher renders dashboard.html from a template + a render script, pulled
+# from these paths at run time. Defaults point at the dashboard_designer skill's
+# bundled assets (seeded under skills_dir). Point `template` at your own HTML to
+# restyle the dashboard without touching the gem — the render script injects the
+# run's digest.json into the template's `__DIGEST_JSON__` placeholder.
+# The Publisher runs the render script inside a sandbox shell with a narrowed PATH.
+# If your Ruby is version-managed (mise/asdf/rbenv) and `ruby` won't resolve there,
+# pin `ruby` to an absolute interpreter path.
+# [dashboard]
+# ruby     = "ruby"
+# template = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/assets/dashboard-template.html"
+# renderer = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/scripts/render_dashboard.rb"
+
 # ── Paths (optional) ────────────────────────────────────────────────────────
 # Defaults follow XDG:
-#   sandbox_dir : $XDG_STATE_HOME/nexo-mail/sandbox   (~/.local/state/nexo-mail/sandbox)
-#   skills_dir  : $XDG_CONFIG_HOME/nexo-mail/skills    (~/.config/nexo-mail/skills)
-#   prompts_dir : $XDG_CONFIG_HOME/nexo-mail/prompts   (~/.config/nexo-mail/prompts)
+#   sandbox_dir   : $XDG_STATE_HOME/nexo-mail/sandbox    (~/.local/state/nexo-mail/sandbox)
+#   snapshots_dir : $XDG_STATE_HOME/nexo-mail/snapshots  (~/.local/state/nexo-mail/snapshots)
+#   skills_dir    : $XDG_CONFIG_HOME/nexo-mail/skills     (~/.config/nexo-mail/skills)
+#   prompts_dir   : $XDG_CONFIG_HOME/nexo-mail/prompts    (~/.config/nexo-mail/prompts)
 # Uncomment to override:
-# sandbox_dir = "~/nexo-mail/sandbox"
-# skills_dir  = "~/nexo-mail/skills"
-# prompts_dir = "~/nexo-mail/prompts"
+# sandbox_dir   = "~/nexo-mail/sandbox"
+# snapshots_dir = "~/nexo-mail/snapshots"
+# skills_dir    = "~/nexo-mail/skills"
+# prompts_dir   = "~/nexo-mail/prompts"

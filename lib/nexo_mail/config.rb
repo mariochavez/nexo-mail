@@ -25,6 +25,35 @@ module NexoMail
     def prompts_dir = path("NEXO_MAIL_PROMPTS_DIR", data["prompts_dir"], File.join(config_dir, "prompts"))
     def sandbox_dir = path("NEXO_MAIL_SANDBOX_DIR", data["sandbox_dir"], File.join(state_home, APP, "sandbox"))
 
+    # Each run archives its artifacts (digest.json, dashboard.html, inbox-digest.md)
+    # into a timestamped subdirectory here; `nexo-triage --prune-snapshots` trims them.
+    def snapshots_dir = path("NEXO_MAIL_SNAPSHOTS_DIR", data["snapshots_dir"], File.join(state_home, APP, "snapshots"))
+
+    # How many run snapshots to keep when pruning (newest wins). Default 20.
+    def snapshots_keep
+      val("NEXO_MAIL_SNAPSHOTS_KEEP", data["snapshots_keep"], "20").to_i
+    end
+
+    # The dashboard template + render script the Publisher pulls from at run time.
+    # Default to the seeded dashboard_designer skill assets; point `[dashboard]
+    # template` at your own HTML to restyle the dashboard without touching the gem.
+    def dashboard_template
+      path("NEXO_MAIL_DASHBOARD_TEMPLATE", data.dig("dashboard", "template"),
+        File.join(skills_dir, "dashboard_designer", "assets", "dashboard-template.html"))
+    end
+
+    def dashboard_renderer
+      path("NEXO_MAIL_DASHBOARD_RENDERER", data.dig("dashboard", "renderer"),
+        File.join(skills_dir, "dashboard_designer", "scripts", "render_dashboard.rb"))
+    end
+
+    # The Ruby interpreter the Publisher uses to run the render script inside its
+    # sandbox shell. Defaults to "ruby" (resolved on PATH); pin an absolute path
+    # (e.g. a mise-managed Ruby) when the sandbox's narrowed PATH won't resolve it.
+    def dashboard_ruby
+      val("NEXO_MAIL_DASHBOARD_RUBY", data.dig("dashboard", "ruby"), "ruby")
+    end
+
     # --- Parsed config (memoized) --------------------------------------------
     def data
       @data ||= load

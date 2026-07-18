@@ -4,7 +4,7 @@ module NexoMail
   module Agents
     # HEY — reached through the `hey` CLI via read-only tool wrappers.
     class HeySource < SourceAgent
-      def self.source_tools = [Tools::HeyImbox, Tools::HeyThread]
+      def self.source_tools = [Tools::HeyBox, Tools::HeyThread]
 
       def self.prompt_key = "hey"
 

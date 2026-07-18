@@ -1,57 +1,104 @@
 ---
 name: email_triage
-description: Triage an email inbox — sort recent messages into Action / FYI / Noise and produce a short, prioritized markdown digest of what deserves attention. Read-only classification.
+description: Triage one email inbox and EXTRACT it into structured JSON — classify each recent message into Action / FYI / Noise, and pull the entities that matter (payments & charges, meetings, people, newsletter topics). Read-only. The deliverable is a JSON file, not prose.
 ---
 
-# Email Triage
+# Email Triage → Structured Extraction
 
-Turn an inbox into a short, prioritized digest: read recent messages, sort each
-into one bucket, and summarize the ones that matter.
+You read ONE inbox and turn its recent messages into a structured JSON array.
+Downstream tooling (a financial roll-up, a schedule view, per-topic briefings,
+a dashboard) is built entirely from the fields you emit — so extract carefully
+and never invent values. Classify from the metadata you already have (sender,
+subject, snippet); open a full message only to settle a genuinely ambiguous
+case or to read a receipt/invitation you must extract numbers or times from.
 
-## Buckets
+This is **read-only classification**. You never send, delete, or modify mail.
 
-Sort every message into exactly one bucket:
+## The deliverable: a JSON array
+
+When the caller names a file, write a single JSON array to it with the write
+tool, then reply with a one-line confirmation. No markdown, no prose in the
+file — just the array. One object per message you keep (skip pure Noise unless
+an "always surface" rule applies).
+
+```json
+[
+  {
+    "bucket": "action",
+    "category": "payment",
+    "sender": "Netflix",
+    "sender_email": "info@netflix.com",
+    "subject": "Your receipt for July",
+    "summary": "Monthly subscription charged to your card ending 4242.",
+    "received_at": "2026-07-15",
+    "importance": 60,
+    "payment": {
+      "merchant": "Netflix",
+      "amount": 15.99,
+      "currency": "USD",
+      "direction": "charged",
+      "kind": "subscription",
+      "due_date": null
+    }
+  }
+]
+```
+
+### Fields
+
+Required on every item:
+
+| Field | Values / shape |
+|---|---|
+| `bucket` | `"action"` \| `"fyi"` \| `"noise"` — Action = reader must reply/decide/do; FYI = worth knowing, no response; Noise = newsletters/notifications/receipts (still emit if it carries a payment, meeting, or topic worth a picture). |
+| `category` | one of: `payment`, `meeting`, `personal`, `work`, `newsletter`, `notification`, `travel`, `security`, `other`. |
+| `sender` | display name (fall back to the address). |
+| `sender_email` | the address, or `null` if unknown. |
+| `subject` | the subject line, verbatim. |
+| `summary` | ONE sentence, in your own words, quoting at most a short phrase. The single thing that matters. |
+| `received_at` | ISO date or datetime from the message metadata; `null` if unavailable. Never guess a date. |
+
+Optional — include ONLY when the message genuinely carries it:
+
+- `importance`: integer 0–100 (your judgement of how much this matters to the reader).
+- `thread_id`: the provider's thread/conversation id, if the tools expose it.
+- `payment`: see [financial_summary](../financial_summary/SKILL.md). Attach to any
+  receipt, invoice, charge, bill, refund, or payment-due message. Never fabricate
+  an amount — omit `payment` if you can't read a real number.
+- `meeting`: `{ "title", "start", "end", "location", "link", "rsvp" }` — for
+  calendar invites, scheduling requests, or messages proposing a specific time.
+  `start`/`end` are ISO datetimes; `rsvp` is `true` when a response is expected.
+- `people`: array of person names the reader personally knows who are central to
+  the message (for `personal` items especially). Omit for machine senders.
+- `topics`: array of short topic tags for `newsletter` items — see
+  [interest_radar](../interest_radar/SKILL.md). E.g. `["ruby", "rails"]`,
+  `["photography"]`.
+
+## Buckets, briefly
 
 | Bucket | Meaning |
 |---|---|
-| **Action** | The reader must reply, decide, or do something. |
-| **FYI** | Worth knowing; no response needed. |
-| **Noise** | Newsletters, notifications, receipts — left out of the digest. |
+| **action** | Reply, decide, pay, RSVP, or do something. |
+| **fyi** | Worth knowing; no response needed. |
+| **noise** | Newsletters, notifications, receipts. |
 
-Classify from the metadata you already have — sender, subject, and snippet. Open a
-full message only to settle a genuinely ambiguous case.
+A newsletter is usually `noise` by bucket but still emit it when it has
+`topics` (so the topic radar can build a picture) or a `payment`. A receipt is
+`noise` by bucket but emit it with a `payment` so the money picture is complete.
 
 ## Always surface
 
-Treat any message mentioning one of these as important — bucket it **Action** if it
-asks for anything, otherwise **FYI**, and always include it in the digest:
+Treat any message mentioning one of these as important — set `bucket` to
+`action` if it asks for anything, otherwise `fyi`, and always emit it:
 
 - **FOTOSETIEMBRE**
 - **500 Global** (also written **500 Startups** / **500.co**)
 
-## Digest
+## Rules
 
-Your deliverable is this markdown, most important first:
-
-```markdown
-# Inbox Digest — <date>
-
-## Needs action (<n>)
-- **<sender>** — <subject>: <the one thing that matters>
-
-## FYI (<n>)
-- **<sender>** — <subject>: <why it matters>
-
-_<n> noise messages skipped._
-```
-
-Keep each line to one sentence and summarize in your own words, quoting at most a
-short phrase.
-
-## Saving
-
-When the caller names a file to save to, write the digest there once with the write
-tool, then reply with a one-line confirmation. Otherwise the digest itself is your
-reply. Work with the reading tools you were given plus the write tool.
-
-When a tool call fails, note the gap in the digest and carry on with what you read.
+- Extract, don't summarize into prose. The file is data.
+- Never invent amounts, dates, times, or names. Omit the optional field instead.
+- One object per kept message. Deduplicate obvious repeats of the same thread.
+- If a tool call fails, extract what you can from what you read and carry on;
+  the array you write is still valid JSON.
+- Write the array exactly once, then confirm in one line.

@@ -29,6 +29,7 @@ module NexoMail
       configure_logging
 
       return print_check if opts[:check]
+      return prune_snapshots(opts[:prune]) if opts.key?(:prune)
 
       configure_model!(@cli_model)
       triage
@@ -79,6 +80,7 @@ module NexoMail
         o.on("-m", "--model ALIAS", "Use the configured model with this alias (default: first)") { |v| opts[:model] = v }
         o.on("--theme FLAVOR", Theme.flavors, "Catppuccin flavor: #{Theme.flavors.join(", ")}") { |v| opts[:theme] = v }
         o.on("--check", "Preflight only: which model + services are ready") { opts[:check] = true }
+        o.on("--prune-snapshots [KEEP]", Integer, "Delete old run snapshots, keeping the newest KEEP (default #{Config.snapshots_keep})") { |v| opts[:prune] = v }
         o.on("-h", "--help", "Show help and how to configure everything") { print_help }
       end.parse!(argv)
       opts
@@ -135,16 +137,33 @@ module NexoMail
       puts "  #{dim.render("─" * 24)}"
       puts "  #{brand.render("total".ljust(13))}#{dim.render(clock(total))}"
 
-      art = run.artifacts.find { |a| (a["name"] || a[:name]) == "inbox-digest.md" }
-      digest = art && (art["content"] || art[:content])
+      # The synthesis agent wrote the terminal digest into the workspace; read it
+      # back only to display (no parsing, no generation on the Ruby side).
+      digest = read_artifact("inbox-digest.md")
       puts
       if digest && !digest.strip.empty?
         puts Glamour.render_with_style(digest, Theme.glamour_style(@flavor), width: [term_width, 100].min)
-        puts dim.render("Saved to #{File.join(Config.sandbox_dir, "inbox-digest.md")}")
       else
         puts bad.render("No digest produced (run status: #{run.status}).")
       end
+      print_artifacts(run)
     end
+
+    # Point the user at the two deliverables (dashboard + JSON) and this run's
+    # snapshot — all authored by the agents into the workspace/state dirs.
+    def print_artifacts(run)
+      dash = artifact_path("dashboard.html")
+      json = artifact_path("digest.json")
+      snap = (run.result && (run.result[:snapshot] || run.result["snapshot"])) || Snapshots.list.first
+      puts
+      puts "  #{brand.render("dashboard")}  #{File.exist?(dash) ? dash : dim.render("(not produced)")}"
+      puts "  #{brand.render("data")}       #{File.exist?(json) ? json : dim.render("(not produced)")}"
+      puts "  #{brand.render("snapshot")}   #{snap || dim.render("(not written)")}"
+      puts "  #{dim.render("open the dashboard →")} #{dim.render("open #{dash}")}" if File.exist?(dash)
+    end
+
+    def artifact_path(name) = File.join(Config.sandbox_dir, name)
+    def read_artifact(name) = ((p = artifact_path(name)) && File.exist?(p)) ? File.read(p) : nil
 
     def outcomes(run)
       results = {}
@@ -188,6 +207,30 @@ module NexoMail
       exit 0
     end
 
+    # ---- --prune-snapshots --------------------------------------------------
+
+    # Pruning is agent-driven too: the Archivist decides the calls, the bounded
+    # prune_snapshots tool does the deletion. The CLI only wires the model and shows
+    # the before/after count (a plain directory listing — no snapshot logic here).
+    def prune_snapshots(keep)
+      keep = Config.snapshots_keep if keep.nil?
+      configure_model!(@cli_model)
+      puts header.render("Nexo Mail Agent — snapshots")
+      puts "  #{dim.render("dir: #{Snapshots.dir}")}"
+      before = Snapshots.list.size
+
+      agent = Agents::Archivist.new(cwd: Config.sandbox_dir)
+      agent.prompt("Prune old snapshots, keeping the newest #{keep}. Do not archive.", max_turns: 6)
+      agent.close
+
+      after = Snapshots.list.size
+      puts
+      puts "  #{brand.render("kept".ljust(9))} #{ok.render(after.to_s)} (of #{before})"
+      puts "  #{brand.render("removed".ljust(9))} #{(before - after).zero? ? dim.render("none") : bad.render((before - after).to_s)}"
+      puts
+      exit 0
+    end
+
     def model_check
       return bad.render("none configured — add [[models]] to #{Config.config_file}") unless Config.model_configured?
 
@@ -202,16 +245,18 @@ module NexoMail
 
     def print_help
       puts header.render("Nexo Mail Agent")
-      note "Triage Apple Mail, Gmail & HEY into one prioritized digest. Read-only."
+      note "Triage Apple Mail, Gmail & HEY into one briefing: a digest.json + a"
+      note "self-contained dashboard.html. Agents & skills do the work; read-only mail."
 
       section "USAGE"
       line "nexo-triage [options]"
 
       section "OPTIONS"
-      line "-m, --model ALIAS   Use a configured model by alias (default: the first)"
-      line "    --theme FLAVOR   #{Theme.flavors.join(" | ")} (default from config)"
-      line "    --check          Preflight: which model + services are ready"
-      line "-h, --help           This help"
+      line "-m, --model ALIAS        Use a configured model by alias (default: the first)"
+      line "    --theme FLAVOR        #{Theme.flavors.join(" | ")} (default from config)"
+      line "    --check               Preflight: which model + services are ready"
+      line "    --prune-snapshots [N] Prune run snapshots, keeping the newest N (default #{Config.snapshots_keep})"
+      line "-h, --help                This help"
 
       section "CONFIG — #{Config.config_file}"
       note "Edit the TOML config (created on first run). Every value can use"
@@ -239,8 +284,16 @@ module NexoMail
       line "Install (Go 1.26+): git clone https://github.com/basecamp/hey-cli && go install ./cmd/..."
       line "Authenticate:  hey auth login"
 
+      section "OUTPUT"
+      line "digest.json     the canonical data (built by the synthesis agent)"
+      line "dashboard.html  a self-contained briefing (built by the publisher agent)"
+      line "inbox-digest.md the terminal digest · in #{Config.sandbox_dir}"
+      line "snapshots       each run archived under #{Config.snapshots_dir}"
+
       section "MORE"
-      note "Skills:  #{Config.skills_dir}  (edit email_triage/SKILL.md to retune triage)"
+      note "Skills:  #{Config.skills_dir}"
+      note "  email_triage · financial_summary · interest_radar (extraction),"
+      note "  inbox_synthesis (digest), dashboard_designer (HTML), snapshot_keeper."
       note "Prompts: #{Config.prompts_dir}  (drop common.md / gmail.md / … to extend agents)"
       note "Any unconfigured service is skipped; the run continues. RUBYLLM_WIRE=1 shows logs."
       puts

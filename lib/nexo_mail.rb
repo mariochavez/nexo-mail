@@ -42,7 +42,7 @@ end
 
 # One Zeitwerk root at lib/, so lib/nexo_mail/agents/source_agent.rb maps to
 # NexoMail::Agents::SourceAgent, etc. Default inflections cover every filename here
-# (cli_reader → CliReader, gmail_imap → GmailImap, hey_imbox → HeyImbox).
+# (cli_reader → CliReader, gmail_imap → GmailImap, hey_box → HeyBox).
 loader = Zeitwerk::Loader.for_gem
 loader.ignore("#{__dir__}/nexo_mail/version.rb") # already required above
 loader.inflector.inflect("cli" => "CLI") # cli.rb defines NexoMail::CLI (not Cli)

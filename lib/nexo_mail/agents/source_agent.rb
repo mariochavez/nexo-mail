@@ -10,20 +10,24 @@ module NexoMail
     class SourceAgent < Nexo::Agent
       sandbox :local
       permissions Nexo::Permissions.new(mode: :read_only, allow: NexoMail::SANDBOX_WRITE)
-      skills :email_triage
+      skills :email_triage, :financial_summary, :interest_radar
 
       instructions <<~TXT
-        You triage ONE email inbox with the attached email_triage skill: read recent
-        messages, classify them, and compose the digest. When the prompt names a file,
-        save the digest there with the write tool and confirm in one line. Work with
-        the mail-reading tools you were given plus the write tool.
+        You triage ONE email inbox and EXTRACT it into structured JSON, following the
+        attached skills: read recent messages, classify each into action/fyi/noise,
+        and pull the entities that matter — payments & charges (financial_summary),
+        meetings, people, and newsletter topics (interest_radar). When the prompt
+        names a file, write a single JSON array of item objects to it with the write
+        tool, then confirm in one line. No prose in the file — just the array. Work
+        with the mail-reading tools you were given plus the write tool. Read-only:
+        never send, delete, or modify mail.
       TXT
 
       # Inject the active model onto every triage class (base + concrete sources +
-      # merge), so the `inherited`-copy timing is a non-issue. Called by the CLI
+      # synthesis), so the `inherited`-copy timing is a non-issue. Called by the CLI
       # after config is loaded, before any agent is instantiated.
       def self.configure_model!(model)
-        [SourceAgent, AppleMailSource, GmailSource, HeySource, MergeDigests].each do |klass|
+        [SourceAgent, AppleMailSource, GmailSource, HeySource, Synthesize, Publisher, Archivist].each do |klass|
           klass.model model.model
           klass.provider model.provider.to_sym
           klass.assume_model_exists true

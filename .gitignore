@@ -13,3 +13,4 @@ Gemfile.lock
 /pkg/
 *.gem
 .DS_Store
+tmp/
