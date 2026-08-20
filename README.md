@@ -108,6 +108,9 @@ though it resolves in your terminal. If it doesn't, preflight says so and you pi
 - **Least privilege.** Every agent runs under `:read_only` with only `:read/:glob/:write`.
   The Publisher alone also gets `:shell`, purely to run the bundled render script; it
   attaches no mail tools at all.
+- **That one shell can leave the host.** `[dashboard] sandbox = "docker"` renders the
+  dashboard inside a throwaway container — no network, dropped capabilities, read-only
+  rootfs — with `image` picking the interpreter. `--check` probes whichever you choose.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 

@@ -158,6 +158,46 @@ Two audiences, two mechanisms: `requires` is checked and fails the run; the skil
 `compatibility:` is appended to the model's instructions so it knows what it is
 working with and can say so plainly instead of improvising HTML.
 
+### Where the one shell runs — an optional container
+
+The Publisher is the only agent holding `:shell`, and the only one that reaches no
+mail and needs no network. That makes it the single stage that can be moved off the
+host without changing what the pipeline can do:
+
+```toml
+[dashboard]
+sandbox = "docker"          # local (default) | docker | apple
+image   = "ruby:3.3-slim"
+```
+
+The choice lives on the agent, as a lazy reader over the `sandbox` macro, so Nexo
+**resolves, owns and tears down** the container itself — `Agent#close` closes a
+sandbox it resolved, and there is no teardown code here to forget. The container runs
+with `network: :none`, `--cap-drop ALL` and a read-only rootfs over an ephemeral
+`/workspace` scratch. Where a runtime cannot honor a hardening flag it says so
+(`hardening_gaps`), and that is emitted rather than shrugged off — an omitted flag
+means weaker isolation than was asked for. Apple's runtime cannot write under a
+read-only rootfs at all, so it opts out of that one.
+
+This is also where the artifact plumbing stops being belt-and-braces. On `:local`
+every stage shares one directory, so recording artifacts is insurance. In a container
+the workspace ceases to exist when the stage ends, so `digest.json` must be handed
+**in** and `dashboard.html` carried back **out** — and `collect_artifacts`, which
+resolves declared names through the *workflow's* sandbox, cannot see the agent's.
+The workflow asks the agent which sandbox it has and reads through that one, then
+mirrors the result into the shared workspace so the Archivist and the CLI find it
+exactly where a `:local` run would have left it.
+
+Two knobs change meaning inside a container, and both fail loudly rather than
+quietly: `[dashboard] ruby` pins a *host* interpreter, so the image's own `ruby` is
+used instead (choosing the image is how you choose it), and an absolute
+`template`/`renderer` override is a host path the container cannot see, so the staged
+copy is used and `publisher_override_ignored` is emitted.
+
+`nexo-triage --check` probes whichever sandbox the Publisher declares, so the
+preflight tells you `docker · ruby:3.3-slim → ✓ ruby 3.3.12` — or that your image
+ships no Ruby at all.
+
 ## The integration patterns
 
 Each service exposes itself differently, so each is reached differently — but all
@@ -265,11 +305,12 @@ XSS-safe, and restyling means editing the template — never the app's Ruby.
 - **Fenced writes.** Every agent runs a `:local` sandbox rooted at the workspace;
   the path guard rejects `../` traversal and symlink escapes. Beyond read-only,
   agents get only `:write` (`SANDBOX_WRITE = %i[read glob write]`).
-- **One scoped shell exception.** The **Publisher alone** also gets `:shell`, purely
-  to run the render script — it attaches no mail tools and reads only the
-  already-produced `digest.json`. Every mail-reading agent stays `:read_only` with
-  no shell (`AppleMailSource.permissions.authorize!(:shell)` raises; the Publisher's
-  does not).
+- **One scoped shell exception, optionally containerized.** The **Publisher alone**
+  also gets `:shell`, purely to run the render script — it attaches no mail tools and
+  reads only the already-produced `digest.json`. Every mail-reading agent stays
+  `:read_only` with no shell (`AppleMailSource.permissions.authorize!(:shell)` raises;
+  the Publisher's does not). `[dashboard] sandbox = "docker"` moves that shell off the
+  host entirely, into a network-less container.
 - **Bounded destructive tools.** `PruneSnapshots` deletes only inside the snapshots
   dir; the agent decides *to* prune, the tool does the deletion deterministically.
 - **De-dup, twice.** Cross-source (the same email in two inboxes) and cross-group

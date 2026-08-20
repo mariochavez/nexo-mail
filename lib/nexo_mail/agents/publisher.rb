@@ -19,8 +19,25 @@ module NexoMail
       @skills = %i[dashboard_designer]
 
       # Add :shell on top of the sandbox read/glob/write, so Nexo attaches the Shell
-      # tool (the Local sandbox supports it). Mode stays :read_only.
+      # tool (every sandbox tier below supports it). Mode stays :read_only.
       permissions Nexo::Permissions.new(mode: :read_only, allow: %i[read glob write shell])
+
+      # WHERE the one shell in this app runs. It reaches no mail and needs no
+      # network, so it is the single stage that can be moved off the host entirely:
+      # `[dashboard] sandbox = "docker"` puts it in a throwaway container with no
+      # network, dropped capabilities and a read-only rootfs over an ephemeral
+      # scratch. "local" (the default) keeps it in the shared workspace.
+      #
+      # A lazy READER override, like .requires above: Config is not loaded until
+      # CLI.run, and Nexo resolves the sandbox on first touch. Because the agent
+      # resolves this itself rather than being handed one, Nexo also OWNS it and
+      # closes it in #close — no teardown code here, and no leaked container.
+      def self.sandbox
+        return :local unless Config.dashboard_containerized?
+
+        {type: Config.dashboard_sandbox.to_sym, image: Config.dashboard_image,
+         network: :none, readonly_rootfs: Config.dashboard_sandbox != "apple"}
+      end
 
       def self.prompt_key = "publisher"
 

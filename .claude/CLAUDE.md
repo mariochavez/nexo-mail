@@ -139,6 +139,30 @@ parses no JSON, renders nothing.
   (`CLI#print_sandbox_check`) so the gap shows up before a run. `drive_agent` rescues
   `Nexo::EnvironmentError` separately and tags the event `unmet: true` — the fix is
   provisioning, not a retry.
+- **The Publisher's sandbox is CONFIG-DRIVEN and Nexo owns it.**
+  `Agents::Publisher.sandbox` is a lazy READER override returning `:local` or a
+  container options Hash from `[dashboard] sandbox` / `image` (local|docker|apple,
+  default local). Because the agent RESOLVES it rather than being handed one, Nexo
+  also closes it in `Agent#close` — never inject via `new(sandbox:)` here, that makes
+  it borrowed and you own the teardown (a leaked container per run). The container is
+  `network: :none` + cap-drop + read-only rootfs; `readonly_rootfs` is forced FALSE
+  for `apple`, which cannot write under it. `hardening_gaps` is emitted, not ignored.
+- **Containerized, `digest.json` goes IN and `dashboard.html` comes OUT by hand.**
+  Docker REFUSES a bind at the tmpfs scratch path (`Duplicate mount point:
+  /workspace`, verified), so there is no shared-directory shortcut. `hand_over_inputs`
+  copies the digest sandbox-to-sandbox reading from the WORKSPACE (the file the
+  previous stage wrote is the source of truth, not the run record — the run record
+  copy may be missing if synthesis failed to record). `collect_declared` picks the
+  reader with `shares_workspace?`: Nexo's `collect_artifacts` resolves declared names
+  through the WORKFLOW's sandbox and cannot see a container's, so `import_artifacts`
+  reads through `agent.sandbox` and MIRRORS into the workspace root — the Archivist
+  and the CLI both look there. `shares_workspace?` tolerates a duck with no
+  `#sandbox`, matching Nexo's own guard.
+- **Two `[dashboard]` knobs change meaning in a container.** `ruby` pins a HOST
+  interpreter, so `publisher_ruby` uses the image's `ruby` instead; an absolute
+  `template`/`renderer` override is a host path the container cannot see, so
+  `in_workspace` falls back to the staged copy and emits `publisher_override_ignored`.
+  Both are loud, never silent.
 - **A skill states its needs in `compatibility:`** — the Agent Skills spec's own
   frontmatter field, which nexo_ai >= 0.9 appends to the model's instructions.
   `dashboard_designer` uses it to say it needs a Ruby 3.0+ interpreter and the shell

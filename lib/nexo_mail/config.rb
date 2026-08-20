@@ -90,6 +90,29 @@ module NexoMail
       val("NEXO_MAIL_DASHBOARD_RUBY", data.dig("dashboard", "ruby"), "ruby")
     end
 
+    # Which sandbox the Publisher renders in: "local" (default — the shared
+    # workspace, same as every other agent) or "docker" / "apple" (a throwaway
+    # container). The Publisher is the only agent holding :shell and it reaches no
+    # mail, so it is the one stage that can be isolated at no cost to the pipeline.
+    # An unknown value is an explicit error, never a silent fall back to the host.
+    DASHBOARD_SANDBOXES = %w[local docker apple].freeze
+
+    def dashboard_sandbox
+      value = val("NEXO_MAIL_DASHBOARD_SANDBOX", data.dig("dashboard", "sandbox"), "local").to_s.strip.downcase
+      return value if DASHBOARD_SANDBOXES.include?(value)
+
+      raise NexoMail::Error,
+        "[dashboard] sandbox must be one of #{DASHBOARD_SANDBOXES.join(", ")} (got #{value.inspect})"
+    end
+
+    def dashboard_containerized? = dashboard_sandbox != "local"
+
+    # The image the containerized Publisher runs in. It needs nothing but a Ruby
+    # interpreter — the render script is pure stdlib — so any ruby:* tag works.
+    def dashboard_image
+      val("NEXO_MAIL_DASHBOARD_IMAGE", data.dig("dashboard", "image"), "ruby:3.3-slim")
+    end
+
     # --- Read shaping ---------------------------------------------------------
     # How much mail the source tools pull, and how much of each message they hand
     # the model. These are the ONLY real bound on a runaway read loop: the

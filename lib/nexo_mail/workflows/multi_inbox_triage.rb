@@ -130,6 +130,9 @@ module NexoMail
 
       # ---- artifacts (nexo_ai >= 0.9) -------------------------------------------
 
+      # The one input the render stage needs, and the pipeline's canonical artifact.
+      DIGEST = "digest.json"
+
       # Copy the agent's DECLARED outputs (`produces`) onto the run record. Nexo
       # reads each name through this workflow's sandbox and stores the bytes on the
       # run, so a deliverable outlives the workspace that held it — and so a caller
@@ -138,10 +141,37 @@ module NexoMail
       def collect_declared(agent, tag)
         return unless agent
 
-        collected = collect_artifacts(agent)
+        collected = shares_workspace?(agent) ? collect_artifacts(agent) : import_artifacts(agent)
         emit(:artifacts_collected, stage: tag, names: collected.map { |a| a["name"] }) unless collected.empty?
       rescue => e
         emit(:artifact_skipped, stage: tag, error: e.message)
+      end
+
+      # Nexo's collect_artifacts resolves an agent's declared names through the
+      # WORKFLOW's sandbox. That is right for every agent writing into the shared
+      # workspace and wrong for one sandboxed elsewhere, so ask the agent itself.
+      # Tolerant of a duck the way Nexo's own collect_artifacts is: anything that
+      # cannot name its sandbox is assumed to write into the shared workspace.
+      def shares_workspace?(agent)
+        !agent.respond_to?(:sandbox) || agent.sandbox.is_a?(Nexo::Sandboxes::Local)
+      end
+
+      # Collection for a containerized agent, whose workspace ceases to exist the
+      # moment the stage ends. Read each declared name through the agent's own
+      # sandbox, record the bytes on the run, and mirror them into the shared
+      # workspace so the later stages (the Archivist) and the CLI find them exactly
+      # where a :local run would have left them.
+      def import_artifacts(agent)
+        return [] unless agent.class.respond_to?(:produces)
+
+        agent.class.produces.filter_map do |name|
+          body = agent.sandbox.read(name)
+          sandbox.write(name, body)
+          artifact(name, content: body)
+        rescue => e
+          emit(:artifact_skipped, name: name.to_s, error: e.message)
+          nil
+        end
       end
 
       # The source agents can't use `produces`: one EmailSource CLASS serves every
@@ -179,20 +209,57 @@ module NexoMail
       # never persist across runs. The residual window is one turn, by a script the
       # agent is told to run verbatim.
       def publisher_prompt(agent)
+        emit(:publisher_sandbox, kind: Config.dashboard_sandbox, image: Config.dashboard_image)
+        # An omitted hardening flag means WEAKER isolation than was asked for, so the
+        # runtime reporting one is worth an event rather than a shrug.
+        gaps = agent.sandbox.hardening_gaps if agent.sandbox.respond_to?(:hardening_gaps)
+        emit(:publisher_hardening_gaps, gaps: gaps) if gaps && !gaps.empty?
+
         skill = Agents::Publisher.skills.first
         staged = stage_skill_resources(skill, agent.sandbox)
-        renderer = Config.dashboard_renderer(skill) { staged[:scripts]&.first }
-        template = Config.dashboard_template(skill) { staged[:assets]&.first }
+        renderer = in_workspace(Config.dashboard_renderer(skill) { staged[:scripts]&.first }, staged[:scripts]&.first)
+        template = in_workspace(Config.dashboard_template(skill) { staged[:assets]&.first }, staged[:assets]&.first)
         unless renderer && template
           emit(:publisher_failed, error: "the #{skill} skill ships no #{renderer ? "asset" : "script"} to render with")
           return nil
         end
+        return nil unless hand_over_inputs(agent)
 
         "Render the dashboard per the #{skill} skill, with the shell tool. Its script " \
           "and template have been staged into your workspace, so you can read or glob " \
           "them if you need to. Run exactly:\n\n" \
-          "  #{Config.dashboard_ruby} #{renderer.inspect} digest.json #{template.inspect} dashboard.html\n\n" \
+          "  #{publisher_ruby} #{renderer.inspect} digest.json #{template.inspect} dashboard.html\n\n" \
           "Then confirm in one line. Do not hand-write the HTML."
+      end
+
+      # `[dashboard] ruby` pins a HOST interpreter — the answer to a narrowed sandbox
+      # PATH on :local. Inside a container that path does not exist; the image's own
+      # ruby is the only one there, and choosing the image is how you choose it.
+      def publisher_ruby = Config.dashboard_containerized? ? "ruby" : Config.dashboard_ruby
+
+      # `[dashboard] template` / `renderer` override with an ABSOLUTE HOST path, which
+      # a container cannot see. Fall back to the staged, workspace-relative copy and
+      # say so, rather than emitting a render command that is certain to fail.
+      def in_workspace(path, staged)
+        return path unless Config.dashboard_containerized? && path.to_s.start_with?("/") && staged
+
+        emit(:publisher_override_ignored, path: path.to_s, using: staged)
+        staged
+      end
+
+      # Hand the stage its input. On :local digest.json is already in the shared
+      # workspace and this is a no-op; a container starts with an empty one, so the
+      # bytes are copied across. Sandbox to sandbox, reading from the workspace
+      # rather than the run record: the file the previous stage wrote is the source
+      # of truth, and the recorded artifact is a copy of it.
+      def hand_over_inputs(agent)
+        return true if shares_workspace?(agent)
+
+        agent.sandbox.write(DIGEST, sandbox.read(DIGEST))
+        true
+      rescue => e
+        emit(:publisher_failed, error: "could not hand #{DIGEST} to the render sandbox: #{e.message}")
+        false
       end
 
       # Copies every file the skill ships into the sandbox, preserving the

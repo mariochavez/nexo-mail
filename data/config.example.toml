@@ -61,7 +61,18 @@ flavor = "mocha"
 # The Publisher runs the render script inside a sandbox shell with a narrowed PATH.
 # If your Ruby is version-managed (mise/asdf/rbenv) and `ruby` won't resolve there,
 # pin `ruby` to an absolute interpreter path.
+#
+# WHERE it renders is `sandbox`: "local" (default — the shared workspace, same as
+# every other agent) or "docker" / "apple" (a throwaway container with no network,
+# dropped capabilities and a read-only rootfs). The Publisher is the only agent
+# holding a shell and it reaches no mail, so containerizing it costs the pipeline
+# nothing. In a container the interpreter comes from the `image` — `ruby` below
+# applies to the local sandbox only, and an absolute `template`/`renderer` override
+# is ignored there because a host path does not exist inside the container.
+# `nexo-triage --check` probes whichever of these you pick.
 # [dashboard]
+# sandbox  = "local"          # local | docker | apple
+# image    = "ruby:3.3-slim"  # containerized runs only
 # ruby     = "ruby"
 # template = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/assets/dashboard-template.html"
 # renderer = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/scripts/render_dashboard.rb"

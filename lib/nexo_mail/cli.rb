@@ -238,10 +238,13 @@ module NexoMail
     # Purely diagnostic: nothing here is fatal.
     def print_sandbox_check
       required = Agents::Publisher.requires[:commands]
-      env = Nexo::Sandboxes.resolve(:local, cwd: Config.sandbox_dir)
-        .environment(commands: required.keys)
+      # Probe the SAME sandbox the Publisher declares, so `[dashboard] sandbox =
+      # "docker"` checks the image rather than your host. One declaration, one probe.
+      box = Nexo::Sandboxes.resolve(Agents::Publisher.sandbox, cwd: Config.sandbox_dir)
+      where = Config.dashboard_containerized? ? "#{Config.dashboard_sandbox} · #{Config.dashboard_image}" : Config.sandbox_dir
+      env = box.environment(commands: required.keys)
       puts
-      puts "  #{brand.render("sandbox".ljust(11))} #{dim.render(Config.sandbox_dir)}"
+      puts "  #{brand.render("sandbox".ljust(11))} #{dim.render(where)}"
       if env[:error]
         puts "  #{" " * 11} #{bad.render("✗ could not inspect: #{env[:error]}")}"
         return
@@ -249,15 +252,25 @@ module NexoMail
 
       required.each { |name, want| puts "  #{" " * 11} #{command_line(name, want, env[:commands][name.to_s])}" }
       puts "  #{" " * 11} #{dim.render("locale #{env[:locale] || "(unset)"}")}"
+      gaps = box.respond_to?(:hardening_gaps) ? box.hardening_gaps : []
+      gaps.each { |gap| puts "  #{" " * 11} #{dim.render("⚠ #{gap}")}" }
     rescue => e
       puts "  #{brand.render("sandbox".ljust(11))} #{dim.render("probe unavailable: #{e.message}")}"
+    ensure
+      box.close if box.respond_to?(:close)
     end
 
     # One "does the sandbox have this, at a good enough version" line.
     def command_line(name, want, found)
       label = File.basename(name.to_s)
       unless found
-        hint = name.to_s.start_with?("/") ? "no such executable there" : "pin [dashboard] ruby to an absolute path"
+        hint = if Config.dashboard_containerized?
+          "the #{Config.dashboard_image} image does not ship one; pick an image that does"
+        elsif name.to_s.start_with?("/")
+          "no such executable there"
+        else
+          "pin [dashboard] ruby to an absolute path"
+        end
         return bad.render("✗ #{name} not reachable from the sandbox shell — #{hint}")
       end
 
