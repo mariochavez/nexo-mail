@@ -104,7 +104,17 @@ module NexoMail
 
     # ---- The run ------------------------------------------------------------
 
-    def triage = drive("Triaging inboxes") { Workflows::MultiInboxTriage.run }
+    # The model goes in as run PAYLOAD, not just on screen. A run's cost is mostly
+    # its model — the same pipeline has taken 3m44s and 33m50s on the same mail —
+    # so a stored run that cannot say which model produced it is not comparable to
+    # anything. Payload is where Nexo keeps a run's inputs, and it persists.
+    def triage
+      drive("Triaging inboxes") do
+        Workflows::MultiInboxTriage.run(
+          model: @active_model.model, provider: @active_model.provider.to_s, model_alias: @active_model.alias
+        )
+      end
+    end
 
     # Continue a run the workflow paused (it read every inbox, then failed to build
     # the digest). Re-entering #call skips the extraction checkpoint, so this costs
@@ -179,7 +189,7 @@ module NexoMail
     def report(run, total)
       results, stages = outcomes(run)
       Sources.all.each { |descriptor| puts source_line(descriptor.name, results[descriptor.name]) }
-      print_stage_breakdown(results, stages, total)
+      print_stage_breakdown(results, stages, total, run_model(run))
 
       # The synthesis agent wrote the terminal digest into the workspace; read it
       # back only to display (no parsing, no generation on the Ruby side).
@@ -199,7 +209,7 @@ module NexoMail
     # shown. Each line also carries the number of model round trips it took, which
     # is the number to look at when a run is slow: a stage that doubled its calls is
     # a prompt problem, a stage that kept its calls and doubled its time is not.
-    def print_stage_breakdown(results, stages, total)
+    def print_stage_breakdown(results, stages, total, model = nil)
       timed = results.values.select { |r| r[:ms] }
       rows = []
       unless timed.empty?
@@ -220,6 +230,22 @@ module NexoMail
       end
       puts "  #{dim.render("─" * 40)}"
       puts "  #{brand.render("total".ljust(13))}#{dim.render(duration(total * 1000).rjust(7))}"
+      puts "  #{dim.render("on".ljust(13))}#{dim.render(model)}" if model
+    end
+
+    # What this run actually ran on, from the run's own payload — so an old run
+    # read back from runs_dir reports the model it used, not whichever one happens
+    # to be configured now. Falls back to the active model for a run recorded
+    # before this was stored.
+    def run_model(run)
+      p = run.respond_to?(:payload) ? (run.payload || {}) : {}
+      model = p["model"] || p[:model]
+      return "#{@active_model.model} (#{@active_model.provider})" if model.nil? && @active_model
+
+      return nil if model.nil?
+
+      al = p["model_alias"] || p[:model_alias]
+      "#{model} (#{p["provider"] || p[:provider]})#{" · #{al}" if al && al != model}"
     end
 
     # Point the user at the two deliverables (dashboard + JSON) and this run's
