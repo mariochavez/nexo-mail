@@ -174,11 +174,12 @@ module NexoMail
       end
     end
 
+    STAGE_LABELS = {"synthesis" => "digest", "publisher" => "dashboard", "archivist" => "archive"}.freeze
+
     def report(run, total)
-      results = outcomes(run)
+      results, stages = outcomes(run)
       Sources.all.each { |descriptor| puts source_line(descriptor.name, results[descriptor.name]) }
-      puts "  #{dim.render("─" * 24)}"
-      puts "  #{brand.render("total".ljust(13))}#{dim.render(clock(total))}"
+      print_stage_breakdown(results, stages, total)
 
       # The synthesis agent wrote the terminal digest into the workspace; read it
       # back only to display (no parsing, no generation on the Ruby side).
@@ -191,6 +192,34 @@ module NexoMail
       end
       print_artifacts(run)
       print_resume_hint(run)
+    end
+
+    # Where the wall clock actually went. The sources run CONCURRENTLY, so their
+    # times do not add up — the stage costs the slowest one, and that is what is
+    # shown. Each line also carries the number of model round trips it took, which
+    # is the number to look at when a run is slow: a stage that doubled its calls is
+    # a prompt problem, a stage that kept its calls and doubled its time is not.
+    def print_stage_breakdown(results, stages, total)
+      timed = results.values.select { |r| r[:ms] }
+      rows = []
+      unless timed.empty?
+        rows << ["read inboxes", timed.map { |r| r[:ms] }.max, timed.sum { |r| r[:calls].to_i },
+          "#{timed.size} in parallel"]
+      end
+      STAGE_LABELS.each do |key, label|
+        stage = stages[key] or next
+        rows << [label, stage[:ms], stage[:calls].to_i, (stage[:state] == :failed) ? "failed" : nil]
+      end
+      return if rows.empty?
+
+      puts "  #{dim.render("─" * 40)}"
+      rows.each do |label, ms, calls, note|
+        puts "  #{brand.render(label.ljust(13))}#{dim.render(duration(ms).rjust(7))}" \
+             "  #{dim.render("#{calls} call#{"s" unless calls == 1}".rjust(8))}" \
+             "#{note && "  #{dim.render(note)}"}"
+      end
+      puts "  #{dim.render("─" * 40)}"
+      puts "  #{brand.render("total".ljust(13))}#{dim.render(duration(total * 1000).rjust(7))}"
     end
 
     # Point the user at the two deliverables (dashboard + JSON) and this run's
@@ -235,27 +264,40 @@ module NexoMail
     def artifact_path(name) = File.join(Config.sandbox_dir, name)
     def read_artifact(name) = ((p = artifact_path(name)) && File.exist?(p)) ? File.read(p) : nil
 
+    # Everything the report needs, read back out of the run's own event log: the
+    # per-source outcome, the downstream stage timings, and the number of model
+    # round trips each stage took. The round-trip count is the diagnostic that
+    # matters — a stage's wall clock is round trips times whatever the provider is
+    # charging per call today, and only the first of those is ours to fix.
     def outcomes(run)
       results = {}
+      stages = {}
+      calls = Hash.new(0)
       Nexo::Workflow.logs(run.id) do |ev|
         # emit() stores the data hash with the keys it was called with (symbols
         # here); the in-memory store returns them verbatim (a persisted store would
         # JSON-stringify them). Symbolize so both shapes read the same.
         d = (ev["data"] || ev[:data] || {}).transform_keys(&:to_sym)
-        case (ev["type"] || ev[:type]).to_s
+        type = (ev["type"] || ev[:type]).to_s
+        calls[d[:source]] += 1 if type == "agent_tool_call"
+        case type
         when "source_done" then results[d[:source]] = {state: :ok, ms: d[:ms]}
         when "source_failed" then results[d[:source]] = {state: :failed, ms: d[:ms], detail: d[:error]}
         when "source_skipped" then results[d[:source]] = {state: :skipped, detail: d[:reason]}
+        when /\A(synthesis|publisher|archivist)_(done|failed)\z/
+          stages[$1] = {state: ($2 == "done") ? :ok : :failed, ms: d[:ms], detail: d[:error]}
         end
       end
-      results
+      results.each { |name, r| r[:calls] = calls[name] }
+      stages.each { |name, r| r[:calls] = calls[name] }
+      [results, stages]
     end
 
     def source_line(name, r)
       r ||= {state: :unknown}
       label = brand.render(name.ljust(11))
       case r[:state]
-      when :ok then "  #{ok.render("✓")} #{label} #{dim.render(duration(r[:ms]))}"
+      when :ok then "  #{ok.render("✓")} #{label} #{dim.render(duration(r[:ms]).rjust(7))}  #{dim.render("#{r[:calls]} call#{"s" unless r[:calls] == 1}")}"
       when :failed then "  #{bad.render("✗")} #{label} #{dim.render(duration(r[:ms]))}  #{bad.render("failed: #{r[:detail].to_s[0, 60]}")}"
       when :skipped then "  #{dim.render("⊘")} #{label} #{dim.render("skipped — #{r[:detail]}")}"
       else "  #{dim.render("• #{name} — no result")}"
@@ -437,9 +479,14 @@ module NexoMail
     def term_width = IO.console&.winsize&.last || 80
     def clock(seconds) = format("%02d:%02d", (seconds / 60).to_i, (seconds % 60).to_i)
 
+    # Sub-second in ms, then seconds, then minutes. A ten-minute stage rendered as
+    # "612.4s" is a number you have to do arithmetic on to understand.
     def duration(ms)
       ms = ms.to_i
-      (ms < 1000) ? "#{ms}ms" : format("%.1fs", ms / 1000.0)
+      return "#{ms}ms" if ms < 1000
+      return format("%.1fs", ms / 1000.0) if ms < 60_000
+
+      format("%dm %02ds", ms / 60_000, (ms % 60_000) / 1000)
     end
 
     def section(title) = puts("\n#{brand.render(title)}")
