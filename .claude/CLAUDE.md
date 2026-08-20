@@ -199,9 +199,16 @@ parses no JSON, renders nothing.
   `EXAMINE` (Gmail), hardcoded CLI read subcommands via argv arrays (HEY). Agents run
   a `:local` sandbox fenced to `Config.sandbox_dir` with only `:read/:glob/:write`.
   **One scoped exception:** the `Publisher` agent alone also gets `:shell`, purely to
-  run the bundled dashboard render script — it reaches NO mail (no mail tools). Every
-  mail-reading agent stays `:read_only` with no shell (verify:
-  `GmailSource.permissions.authorize!(:shell)` raises; `Publisher`'s does not).
+  run the bundled dashboard render script — it reaches NO mail (no mail tools).
+  **As of nexo_ai 0.11 the `allow:` list decides the SCHEMA, not just the gate.** Nexo
+  no longer attaches a tool the permission mode can never authorize, so a mail agent's
+  `%i[read glob write]` means the model never even SEES a shell tool — before 0.11 it
+  was advertised, models tried it, and each attempt burned a full round trip (measured
+  in a real run at ~58s per turn). Adding a capability to an `allow:` list now changes
+  what the model is offered, which is the thing to check when a tool "disappears".
+  Verify:
+  `ruby -Ilib -e '…; p Agents::SourceAgent.new(cwd: Dir.pwd).chat.tools.keys'`
+  → no `shell`; the same for `Agents::Publisher` → `shell` present.
 - **Skill-bundled files are AUTO-RESOLVED, never path-joined.** `scripts/`,
   `assets/`, `references/` is *ruby_llm-skills'* convention, and `Nexo::Skills.find`
   already returns a `Skill` exposing `#scripts`/`#assets`. `Config.skill_script` /
@@ -359,5 +366,5 @@ parses no JSON, renders nothing.
 
 ## Dependencies
 
-`nexo_ai ~>0.10`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
+`nexo_ai ~>0.11`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
 `toml-rb`, `async ~>2.0`, `lipgloss`, `glamour`. Requires Ruby **3.3+**.
