@@ -230,13 +230,18 @@ Gmail one IMAP session instead of N, since `with_inbox` opens a fresh connection
 call. Both listings now carry a plain-text `snippet` (Gmail via a grouped partial
 IMAP fetch + MIME decoding, HEY from the `summary` the API already returns), so most
 messages are classified without any body read at all. `Tools::Pool` provides the
-bounded fan-out inside a single tool call.
+bounded fan-out inside a single tool call, over ruby_llm's own `ToolConcurrency`.
 
-**Concurrency is fibers end to end.** The workflow already fans its source agents out
-with `Nexo.concurrent` (async); `Tools::Pool` uses `Sync` + `Async::Semaphore`/
-`Barrier` rather than OS threads; and `Config.tool_concurrency` defaults to `:fibers`
-so ruby_llm overlaps multiple tool calls from a single assistant turn on that same
-reactor. This is sound because Async's scheduler hooks `process_wait`/`io_read`/
+**Concurrency is fibers end to end, and it is one setting.** The workflow fans its
+source agents out with `Nexo.concurrent`; `Config.tool_concurrency` (default
+`:fibers`) makes ruby_llm overlap multiple tool calls from a single assistant turn on
+that same reactor; and `Tools::Pool` — the fan-out *inside* one batched tool call —
+runs on `RubyLLM::ToolConcurrency`, the very same machinery, so it carries no reactor
+plumbing of its own and honors the same knob. Pool adds exactly two things
+ToolConcurrency lacks: a slice-based in-flight bound (it starts one task per entry,
+and Gmail caps simultaneous IMAP connections while `hey` serializes on the keyring),
+and a per-item `guard` that turns a raise into `{error:}` (ToolConcurrency re-raises
+the first error and abandons the rest — one dead thread id must not sink a batch). This is sound because Async's scheduler hooks `process_wait`/`io_read`/
 `io_wait`, so `Open3.capture3` and `Net::IMAP` yield instead of blocking — four
 `sleep 0.4` subprocesses go 1.64s → 0.41s, and four IMAP connects 0.95s → 0.17s.
 

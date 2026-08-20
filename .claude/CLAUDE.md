@@ -245,8 +245,16 @@ parses no JSON, renders nothing.
 - **Concurrency here is fibers, not threads.** `Config.tool_concurrency` defaults to
   **`:fibers`**, so ruby_llm overlaps multiple tool calls from one turn on async —
   the same reactor `Nexo.concurrent` already runs the source agents in.
-  `Tools::Pool` (the in-tool fan-out) is `Sync` + `Async::Semaphore`/`Barrier` for
-  the same reason. This works because Async's scheduler hooks `process_wait`,
+  `Tools::Pool` (the in-tool fan-out) is a thin wrapper over the SAME machinery —
+  `RubyLLM::ToolConcurrency.run` — so one setting governs both axes and Pool owns no
+  reactor plumbing. Two things it must add, and the reasons they are not optional:
+  ToolConcurrency has NO in-flight bound (one task per entry), so `Pool` slices into
+  chunks of `size` — Gmail caps simultaneous IMAP connections per account and `hey`
+  serializes on the keyring; and ToolConcurrency RE-RAISES the first error and
+  abandons the rest, so the per-item `guard` (→ `{error:}`) is what keeps one dead
+  thread id from sinking a batch of fifteen. Measured: peak-in-flight tracks `size`
+  exactly (4→4, 8→8), order preserved, and it nests correctly inside the reactor the
+  workflow already runs. This works because Async's scheduler hooks `process_wait`,
   `io_read` and `io_wait`: `Open3.capture3` and `Net::IMAP` both YIELD rather than
   block (measured: 4×`sleep 0.4` 1.64s → 0.41s; 4 IMAP connects 0.95s → 0.17s).
   Ruby's `Mutex` is fiber-aware, so `Hey::LOCK` yields instead of deadlocking the
