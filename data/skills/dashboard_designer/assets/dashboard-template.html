@@ -103,10 +103,16 @@
   .topic{padding:11px 0;border-top:1px solid var(--border);}.sb>.topic:first-child{border-top:0;}
   .topic .t{font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;color:var(--purple);}
   .topic .h{font-weight:620;margin-top:2px;}
-  .topic ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px;display:none;}
-  .topic.open ul{display:block;}.topic ul li{margin:2px 0;}
+  .topic ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px;}
+  .topic ul li{margin:2px 0;}
   .topic .b{color:var(--muted);font-size:13px;margin-top:3px;display:none;}.topic.open .b{display:block;}
   .topic .more{font-size:12px;color:var(--accent);margin-top:5px;font-weight:600;}
+  .curhead{display:flex;align-items:baseline;justify-content:space-between;margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--border);}
+  .sb>.curhead:first-child{border-top:0;padding-top:0;margin-top:0;}
+  .curhead .code{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--accent);}
+  .curhead .n{font-size:11px;color:var(--muted);}
+  .refund{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:6px;}
+  .refund .a{font-variant-numeric:tabular-nums;}
   .person{padding:11px 0;border-top:1px solid var(--border);}.sb>.person:first-child{border-top:0;}
   .person .n{font-weight:640;}.person .r{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-left:7px;}
   .person .note{color:var(--muted);font-size:13.5px;margin-top:2px;}
@@ -183,7 +189,7 @@
 
   // ---- sections ----
   var grid=el("div",{class:"grid"});
-  if((fin.charges||[]).length||Object.keys(byCur).length) grid.appendChild(moneySec());
+  if(A(fin.charges).length||Object.keys(byCur).length) grid.appendChild(moneySec());
   if(sched.length) grid.appendChild(schedSec());
   if(topics.length) grid.appendChild(radarSec());
   if(people.length) grid.appendChild(peopleSec());
@@ -220,14 +226,36 @@
       el("div",{class:"v"+(small?" sm":"")},val),el("div",{class:"l"},label),el("div",{class:"m"},metaTxt||""));
     return c;
   }
+  // Charges for one currency: the nested shape (by_currency[c].charges) if present,
+  // else the older flat finance.charges filtered down to that currency.
+  function curCharges(c){var b=byCur[c]||{};return A(b.charges).length?A(b.charges):A(fin.charges).filter(function(x){return (x.currency||dom)===c;});}
+  function allCharges(){return curOrder().reduce(function(acc,c){return acc.concat(curCharges(c));},[]);}
+  // Biggest spender first. NEVER summed across currencies — there is no rate here.
+  function curOrder(){
+    var keys=A(fin.currencies).length?A(fin.currencies).slice():Object.keys(byCur);
+    if(!keys.length&&A(fin.charges).length){keys=A(fin.charges).map(function(x){return x.currency||dom;}).filter(function(v,i,a){return v&&a.indexOf(v)===i;});}
+    return keys.sort(function(a,b){var x=byCur[a]||{},y=byCur[b]||{};
+      var xo=(x.out!=null?x.out:(x.charged||0)+(x.due||0)+(x.paid||0));
+      var yo=(y.out!=null?y.out:(y.charged||0)+(y.due||0)+(y.paid||0));
+      return yo-xo;});
+  }
   function moneySec(){
     var sb=el("div",{class:"sb"});
-    var ms=el("div",{class:"mstat"});
-    var tot={charged:0,due:0,paid:0}; Object.keys(byCur).forEach(function(c){var t=byCur[c];tot.charged+=t.charged||0;tot.due+=t.due||0;tot.paid+=t.paid||0;});
-    ms.appendChild(el("div",{class:"due"},el("div",{class:"l"},"Due"),el("div",{class:"v"},money(tot.due,dom))));
-    ms.appendChild(el("div",null,el("div",{class:"l"},"Charged"),el("div",{class:"v"},money(tot.charged,dom))));
-    ms.appendChild(el("div",{class:"paid"},el("div",{class:"l"},"Paid"),el("div",{class:"v"},money(tot.paid,dom))));
-    sb.appendChild(ms);
+    curOrder().forEach(function(c){
+      var t=byCur[c]||{}, rows=curCharges(c);
+      sb.appendChild(el("div",{class:"curhead"},el("span",{class:"code"},c),
+        el("span",{class:"n"},rows.length+(rows.length===1?" item":" items"))));
+      var ms=el("div",{class:"mstat"});
+      ms.appendChild(el("div",{class:"due"},el("div",{class:"l"},"Due"),el("div",{class:"v"},money(t.due||0,c))));
+      ms.appendChild(el("div",null,el("div",{class:"l"},"Charged"),el("div",{class:"v"},money(t.charged||0,c))));
+      ms.appendChild(el("div",{class:"paid"},el("div",{class:"l"},"Paid"),el("div",{class:"v"},money(t.paid||0,c))));
+      sb.appendChild(ms);
+      if(t.refund){sb.appendChild(el("div",{class:"refund"},el("span",null,"Refunded"),el("span",{class:"a"},money(t.refund,c))));}
+      var subs=rows.filter(function(x){return x.kind==="subscription";});
+      if(subs.length){var sd=el("div",{class:"subs"},el("div",{class:"cap"},"Standing orders · "+c));
+        subs.forEach(function(u){sd.appendChild(el("div",{class:"s"},el("span",null,u.merchant||"—"),el("span",{class:"a"},money(u.amount,c))));});
+        sb.appendChild(sd);}
+    });
     var bars=A(fin.chart&&fin.chart.bars);
     if(bars.length){var max=Math.max.apply(null,bars.map(function(b){return Number(b.amount)||0;}).concat([1]));
       var wrap=el("div",{class:"bars"},el("div",{class:"cap"},"Biggest movements"+(fin.chart.currency?" · "+fin.chart.currency:"")));
@@ -235,11 +263,7 @@
         wrap.appendChild(el("div",{class:"bar"},el("div",{class:"l"},el("span",null,b.label||"—"),el("span",{class:"a"},money(b.amount,fin.chart.currency))),
           el("div",{class:"t"},el("div",{class:"f",style:"width:"+w+"%"}))));});
       sb.appendChild(wrap);}
-    var subs=A(fin.subscriptions);
-    if(subs.length){var s=el("div",{class:"subs"},el("div",{class:"cap"},"Standing orders"));
-      subs.forEach(function(u){s.appendChild(el("div",{class:"s"},el("span",null,u.merchant||"—"),el("span",{class:"a"},money(u.amount,u.currency))));});
-      sb.appendChild(s);}
-    return sec("money","a","Money",(fin.charges||[]).length+" items",sb);
+    return sec("money","a","Money",curOrder().length>1?curOrder().length+" currencies":allCharges().length+" items",sb);
   }
   function schedSec(){var sb=el("div",{class:"sb"});
     sched.forEach(function(e){var pill=e.rsvp?el("span",{class:"pill red"},"RSVP"):el("span",{class:"pill green"},"Set");
@@ -248,12 +272,12 @@
         el("div",null,el("div",{class:"w"},e.title||e.subject||"Event"),el("div",{class:"m"},e.location||"")),pill));});
     return sec("schedule","g","Schedule",sched.length+" events",sb);}
   function radarSec(){var sb=el("div",{class:"sb"});
-    topics.forEach(function(t,i){var node=el("div",{class:"topic"+(i===0?" open":""),"data-subject":(t.label||t.topic||"")},
+    topics.forEach(function(t){var node=el("div",{class:"topic","data-subject":(t.label||t.topic||"")},
       el("div",{class:"t"},t.label||t.topic||"topic"), t.headline?el("div",{class:"h"},t.headline):null);
       var bl=A(t.bullets);
       if(bl.length){var ul=el("ul");bl.forEach(function(b){ul.appendChild(el("li",null,b));});node.appendChild(ul);}
-      else if(t.briefing){node.appendChild(el("div",{class:"b"},t.briefing));}
-      if(i>0&&(bl.length||t.briefing)){var m=el("button",{class:"more","aria-expanded":"false"},"Read briefing");
+      if(t.briefing){node.appendChild(el("div",{class:"b"},t.briefing));
+        var m=el("button",{class:"more","aria-expanded":"false"},"Read briefing");
         m.addEventListener("click",function(){var o=node.classList.toggle("open");m.setAttribute("aria-expanded",o?"true":"false");m.textContent=o?"Hide briefing":"Read briefing";});
         node.appendChild(m);}
       sb.appendChild(node);});

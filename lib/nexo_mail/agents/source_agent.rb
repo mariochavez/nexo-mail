@@ -38,6 +38,12 @@ module NexoMail
       # sources leave this empty and use the `mcp` macro instead.
       def self.source_tools = []
 
+      # Attached to EVERY agent, on top of whatever the source declares. A model has
+      # no notion of today, and that is not a stylistic problem: a run generated on
+      # 2026-08-20 produced a schedule of 2026-06-18 / 2026-07-17 / 2026-07-23 —
+      # every appointment already past — and counted June charges as current.
+      def self.common_tools = [Tools::Today]
+
       # The prompt-fragment key (<prompts_dir>/<key>.md) appended to this agent's
       # instructions. nil on the base; concrete sources override.
       def self.prompt_key = nil
@@ -67,7 +73,7 @@ module NexoMail
       # are additive). A `common` fragment applies to every agent, plus a per-agent one.
       def chat(base: nil)
         chat = super
-        tools = source_tools.map(&:new)
+        tools = (source_tools + self.class.common_tools).uniq.map(&:new)
         chat.with_tools(*tools) unless tools.empty?
         [Config.prompt_fragment("common"), Config.prompt_fragment(prompt_key)]
           .compact.each { |fragment| chat.with_instructions(fragment, append: true) }

@@ -103,7 +103,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 ```
 lib/nexo_mail/
   agents/      SourceAgent + AppleMailSource / GmailSource / HeySource / MergeDigests
-  tools/       CliReader, HeyImbox/Thread, GmailImap(::List/::Read)
+  tools/       CliReader, Pool, Hey/HeyBox/HeyThread, CappedTool,
+               GmailImap(::List/::Read/::Mime/::BodyPart)
   workflows/   MultiInboxTriage
   config.rb    XDG/TOML config + ${VAR} + ENV precedence
   bootstrap.rb first-run provisioning

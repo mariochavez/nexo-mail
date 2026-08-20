@@ -68,7 +68,14 @@ module NexoMail
         c.public_send(base_setter, model.api_base) if c.respond_to?(base_setter) && !model.api_base.to_s.empty?
         c.public_send(key_setter, model.api_key) if c.respond_to?(key_setter) && !model.api_key.to_s.empty?
       end
-      Nexo.configure { |c| c.skills_path = Config.skills_dir }
+      # Tool concurrency goes through NEXO's setting (nexo_ai >= 0.8.1), which applies
+      # it to each chat AFTER the tools are attached — every `with_tools` call resets a
+      # chat's concurrency, so setting it globally on RubyLLM first is silently undone
+      # by Nexo's own tool wiring.
+      Nexo.configure do |c|
+        c.skills_path = Config.skills_dir
+        c.tool_concurrency = Config.tool_concurrency
+      end
       Nexo.config.default_model = model.model
       Agents::SourceAgent.configure_model!(model)
     end

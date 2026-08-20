@@ -78,8 +78,47 @@ when merchant + amount match and the dates are within a day or two, emit a singl
 money totals honest. (Cross-source de-duplication of the same email is handled in
 synthesis; this is about collapsing multiple emails describing one charge.)
 
+## Where the amount comes from
+
+The listing snippet usually already contains the total — receipts lead with it.
+Read it from there. Only when the snippet genuinely cuts the number off should
+you open the message, and then **collect every such id and make ONE batched read
+call**, not one per receipt (see "Reading efficiently" in
+[email_triage](../email_triage/SKILL.md)).
+
+A Paper Trail box of forty receipts is not forty reads. It is one listing, then
+at most one batched read for the handful whose totals the snippet truncated.
+
+## Never add up money yourself — and keep currencies apart
+
+When you roll payments up into totals, **call the `SumPayments` tool** with every
+payment that belongs in the briefing, in one call, and copy its answer through. Do
+not add the numbers yourself and do not re-derive the totals afterwards.
+
+It returns `by_currency`, where **each currency is a self-contained block carrying
+its own `charges` list AND its own totals** computed from exactly that list. Write
+both from the same block. This is not a style preference: when the totals and the
+list were produced separately they drifted — a real run reported USD
+`charged: 289.00` against its own list summing to `269.00`, and MXN
+`refund: 7,979.84` against a list summing to `7,899.98` with a count of 5 for four
+entries.
+
+**Never merge currencies.** Not in a total, not in a chart, not in a sentence. There
+is no exchange rate here and the tool will never invent one — MXN 7,899.98 and USD
+1,138.00 are two facts, not one. Report them as separate blocks, biggest `out`
+first.
+
+The tool is a calculator, nothing more: it does not know what today is and will add
+up whatever you give it. **Deciding which payments belong is your job** — filter to
+the run window before you call it.
+
+If it returns `needs_direction` or `ignored`, those payments were NOT counted. Fix
+the `direction` or `amount` and call again, or leave them out and say so — never
+fold them into a total by hand.
+
 ## When unsure
 
 If you cannot read a definite amount, omit `payment` and let the message stand
 on its `category`/`summary` alone. The money picture is built only from numbers
-you actually saw.
+you actually saw. That is always the right answer — never spend an extra round
+trip chasing a number, and never estimate one to avoid the omission.

@@ -34,17 +34,53 @@ module NexoMail
       val("NEXO_MAIL_SNAPSHOTS_KEEP", data["snapshots_keep"], "20").to_i
     end
 
-    # The dashboard template + render script the Publisher pulls from at run time.
-    # Default to the seeded dashboard_designer skill assets; point `[dashboard]
-    # template` at your own HTML to restyle the dashboard without touching the gem.
-    def dashboard_template
-      path("NEXO_MAIL_DASHBOARD_TEMPLATE", data.dig("dashboard", "template"),
-        File.join(skills_dir, "dashboard_designer", "assets", "dashboard-template.html"))
+    # --- Skill-bundled resources ----------------------------------------------
+    # Skills may ship runnable files beside their prose — `scripts/`, `assets/`,
+    # `references/` — which is ruby_llm-skills' own convention, not ours. Resolve
+    # them THROUGH that layer (Nexo::Skills.find delegates to it) instead of
+    # joining paths by hand, so a skill can rename its files, or a new
+    # script-bearing skill can appear, with no code change here.
+    #
+    # Returns nil when the skill ships nothing of that kind — callers decide
+    # whether that is fatal.
+    def skill_script(skill, matching = nil) = skill_resource(skill, :scripts, matching)
+
+    def skill_asset(skill, matching = nil) = skill_resource(skill, :assets, matching)
+
+    # Every file of that kind the skill ships, sorted. Empty when it ships none or
+    # the skill can't be resolved.
+    def skill_files(skill, kind, matching = nil)
+      files = Nexo::Skills.find(skill).public_send(kind).sort
+      matching ? files.select { |f| File.basename(f).include?(matching.to_s) } : files
+    rescue Nexo::Error, Nexo::MissingDependencyError
+      []
     end
 
-    def dashboard_renderer
-      path("NEXO_MAIL_DASHBOARD_RENDERER", data.dig("dashboard", "renderer"),
-        File.join(skills_dir, "dashboard_designer", "scripts", "render_dashboard.rb"))
+    def skill_resource(skill, kind, matching = nil)
+      skill_files(skill, kind, matching).first
+    end
+
+    # The dashboard template + render script the Publisher runs. Both are AUTO-
+    # RESOLVED from the skill the Publisher actually declares — nothing here names
+    # the skill or the filenames. `[dashboard] template` / `renderer` in config.toml
+    # (or NEXO_MAIL_DASHBOARD_*) override, which is how you restyle the dashboard
+    # by pointing at your own HTML without touching the gem.
+    # An explicit override is used as an ABSOLUTE path; otherwise the caller's block
+    # supplies the fallback (the workspace-relative path of the staged resource),
+    # which is returned as-is so the render command stays inside the sandbox.
+    def dashboard_template(skill, &staged)
+      resolve("NEXO_MAIL_DASHBOARD_TEMPLATE", data.dig("dashboard", "template"), skill_asset(skill), &staged)
+    end
+
+    def dashboard_renderer(skill, &staged)
+      resolve("NEXO_MAIL_DASHBOARD_RENDERER", data.dig("dashboard", "renderer"), skill_script(skill), &staged)
+    end
+
+    def resolve(env_name, configured, resolved)
+      override = val(env_name, configured)
+      return File.expand_path(override) if override
+
+      (block_given? ? yield : nil) || resolved
     end
 
     # The Ruby interpreter the Publisher uses to run the render script inside its
@@ -53,6 +89,56 @@ module NexoMail
     def dashboard_ruby
       val("NEXO_MAIL_DASHBOARD_RUBY", data.dig("dashboard", "ruby"), "ruby")
     end
+
+    # --- Read shaping ---------------------------------------------------------
+    # How much mail the source tools pull, and how much of each message they hand
+    # the model. These are the ONLY real bound on a runaway read loop: the
+    # workflow passes max_turns, but Nexo::Loops::RubyLLM accepts and ignores it.
+    # Every value is clamped so a bad TOML entry cannot spawn 200 threads or
+    # flood the context.
+    def gmail_list_limit = read_int("NEXO_MAIL_GMAIL_LIST_LIMIT", "gmail_list_limit", 40, 1..200)
+
+    def gmail_snippet_chars = read_int("NEXO_MAIL_GMAIL_SNIPPET_CHARS", "gmail_snippet_chars", 400, 0..2_000)
+
+    def gmail_read_max_uids = read_int("NEXO_MAIL_GMAIL_READ_MAX_UIDS", "gmail_read_max_uids", 25, 1..100)
+
+    def gmail_body_chars = read_int("NEXO_MAIL_GMAIL_BODY_CHARS", "gmail_body_chars", 4_000, 200..20_000)
+
+    def hey_box_limit = read_int("NEXO_MAIL_HEY_BOX_LIMIT", "hey_box_limit", 40, 1..200)
+
+    def hey_snippet_chars = read_int("NEXO_MAIL_HEY_SNIPPET_CHARS", "hey_snippet_chars", 200, 0..1_000)
+
+    def hey_thread_max_ids = read_int("NEXO_MAIL_HEY_THREAD_MAX_IDS", "hey_thread_max_ids", 15, 1..50)
+
+    def hey_body_chars = read_int("NEXO_MAIL_HEY_BODY_CHARS", "hey_body_chars", 4_000, 200..20_000)
+
+    def hey_payload_max_chars = read_int("NEXO_MAIL_HEY_PAYLOAD_MAX_CHARS", "hey_payload_max_chars", 40_000, 4_000..200_000)
+
+    # How many `hey` fan-out tasks one tool call may start. DEFAULT 1, because the
+    # work is serial anyway: `hey` cannot run concurrently (it races on the macOS
+    # keyring), so Tools::Hey::LOCK holds a mutex across every invocation and raising
+    # this only queues fibers behind it. The lock — not this number — is the safety
+    # invariant; see Tools::Hey for the measurements.
+    def hey_concurrency = read_int("NEXO_MAIL_HEY_CONCURRENCY", "hey_concurrency", 1, 1..8)
+
+    # How ruby_llm executes MULTIPLE tool calls emitted in a single assistant turn:
+    # :fibers (default, via async — the same reactor the workflow already fans its
+    # source agents out in), :threads, or off. Batched read tools mean a turn usually
+    # carries one call, so this matters most when the model lists two inboxes or
+    # reads and writes in the same turn.
+    #
+    # Safe by construction: every mail tool is stateless per call (a fresh IMAP
+    # session, a fresh subprocess), and the one shared resource that cannot take
+    # concurrency — the `hey` CLI — is serialized by Tools::Hey::LOCK regardless of
+    # which caller reaches it.
+    def tool_concurrency
+      raw = val("NEXO_MAIL_TOOL_CONCURRENCY", data.dig("read", "tool_concurrency"), "fibers").to_s.strip.downcase
+      %w[fibers threads].include?(raw) ? raw.to_sym : false
+    end
+
+    # Apple Mail's MCP get_email returns an UNTRUNCATED body — the largest single
+    # context risk in the pipeline. Used by Agents::AppleMailSource to cap it.
+    def apple_body_chars = read_int("NEXO_MAIL_APPLE_BODY_CHARS", "apple_body_chars", 4_000, 200..20_000)
 
     # --- Parsed config (memoized) --------------------------------------------
     def data
@@ -123,6 +209,16 @@ module NexoMail
     end
 
     def env(name) = ENV[name]
+
+    # A clamped integer read-shaping setting from [read] in config.toml. Same
+    # ENV > TOML > default precedence as #val; the clamp is what keeps a typo
+    # ("4000000" for "400") from flooding the context or the thread pool. A
+    # non-numeric value falls back to the default rather than to #to_i's 0 —
+    # otherwise "oops" would silently mean "disable snippets".
+    def read_int(env_name, key, default, range)
+      raw = val(env_name, data.dig("read", key), default).to_s.strip
+      (raw.match?(/\A-?\d+\z/) ? raw.to_i : default).clamp(range.min, range.max)
+    end
 
     def blank?(v) = v.nil? || (v.is_a?(String) && v.strip.empty?)
 

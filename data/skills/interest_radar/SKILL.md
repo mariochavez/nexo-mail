@@ -25,10 +25,20 @@ own for anything else that recurs:
   like Hacker Newsletter, TLDR, Pragmatic Engineer, Bytes, Console, changelog,
   GitHub/PyPI/npm digests, conference CFPs.
 - `photography` — cameras, lenses, technique, gear, shows, contests, photo
-  communities. Senders/sources like PetaPixel, DPReview / Digital Photography
-  Review, Fstoppers, PhotoShelter, 500px, Shotkit, B&H/Adorama photo mailers,
-  and anything mentioning **FOTOSETIEMBRE**. If a message is clearly about
+  communities, galleries and museums. Senders/sources like PetaPixel, DPReview /
+  Digital Photography Review, Fstoppers, PhotoShelter, 500px, Shotkit,
+  B&H/Adorama photo mailers, **Aperture**, **LensCulture**, **Medium Photo**,
+  **Centro de la Imagen**, **La Fábrica**, **PHOTOSNACK**, **Hasselblad**,
+  **PhMuseum**, and anything mentioning **FOTOSETIEMBRE**. Exhibition openings,
+  open calls and portfolio reviews all count. If a message is clearly about
   making or viewing photographs, tag `photography` even if the sender is unknown.
+- `business` — indie/bootstrapped software business, pricing, hiring, running a
+  small company. Senders like **Calm Companies**, **Every**, **calm.co**,
+  MicroConf, Indie Hackers, and job boards such as **Rails Job Board** (which
+  also carries `rails`).
+
+Ruby senders worth knowing by name: **Ruby Weekly**, **Awesome Ruby**,
+**AI Ruby News**, Short Ruby Newsletter, RubyFlow, The Ruby Dispatch.
 
 Ruby and Rails are the reader's core interests — tag them precisely and never let
 a Ruby/Rails issue get swallowed under the broad `tech` tag (it can carry both,
@@ -46,14 +56,27 @@ reader's tracked interests — **`ruby`, `rails`, `photography`** — surface th
 topic even from a **single** item; don't require a second one. For the broad
 `tech` topic, surface it when there's a reasonable picture (roughly 2+ items).
 Lead the radar with **Ruby** then **Rails** (the strongest interests), then the
-rest. Condense each topic into **2–3 tight bullets** — the reader skims bullets
-far faster than a paragraph, and the dashboard renders them as a list:
+rest. Give each topic **as many bullets as it has distinct developments, up to 6** —
+the dashboard renders every topic's bullets as a visible list, so this is the main
+thing the reader actually reads:
 
-- Each bullet is ONE concrete development — a release, a shift, a notable piece —
-  named with specifics (versions, tools, names) over vibes. ≤ ~15 words.
-- Order bullets most-important first. 2 is fine; never more than 3.
-- Also give a one-line `headline` (the single biggest thing) and keep a short
-  `briefing` paragraph as a fallback for renderers that don't show bullets.
+- Each bullet is ONE concrete development — a release, a shift, a notable piece,
+  an exhibition, an open call — named with specifics (versions, tools, names,
+  venues, dates) over vibes. ≤ ~15 words.
+- Order bullets most-important first. **Scale to the material:** a topic fed by one
+  newsletter gets 2; a topic fed by six issues should get 5–6. Do NOT collapse six
+  newsletters into three generic bullets — that throws away the reason the reader
+  subscribed. Merge only genuine duplicates of the same story.
+- Prefer more topics over one crowded topic. If `tech` is absorbing AI, tooling and
+  industry news that each have their own signal, split them out — a topic per real
+  interest reads better than a catch-all. Conversely, don't split what the reader
+  treats as one thing: keep `ruby` and `rails` distinct only when each genuinely
+  has its own developments this run.
+- Also give a one-line `headline` (the single biggest thing) and a short `briefing`
+  paragraph. The briefing is NOT a fallback — the dashboard shows it behind a
+  "Read briefing" toggle on every topic, so write it as the fuller story the
+  bullets summarise: what happened, why it matters to this reader, what connects
+  the items. 2–4 sentences.
 - Cite the items feeding the topic by subject so the dashboard can link back.
 
 Emit briefings in the synthesis JSON as:

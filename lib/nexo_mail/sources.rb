@@ -49,7 +49,7 @@ module NexoMail
           availability: lambda do
             next "hey not found on PATH" unless Agents::EmailSource.command?("hey")
 
-            data = Tools::CliReader.json("hey", "auth", "status", "--json")
+            data = Tools::Hey.run("auth", "status", "--json")
             data = data.is_a?(Hash) ? (data["data"] || {}) : {}
             next "hey not authenticated (run `hey auth login`)" unless data["authenticated"]
             next "hey session expired (run `hey auth login`)" if data["expired"]

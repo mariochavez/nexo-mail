@@ -19,6 +19,12 @@ module NexoMail
 
       def self.prompt_key = "synthesize"
 
+      # The digest is where money arithmetic happens, and where it was measurably
+      # wrong: by_currency reported USD 289.00 against its own list summing to 269.00
+      # (and the true extracted figure was 1218.00). SumPayments does the addition and
+      # hands back the list and the totals together so they cannot drift apart.
+      def self.source_tools = [Tools::SumPayments]
+
       instructions <<~TXT
         You build the digest from the per-source extraction files already written to
         the workspace. Following the inbox_synthesis, financial_summary and
