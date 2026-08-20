@@ -15,6 +15,20 @@ is to turn those into ONE picture and write two files with the write tool:
 Then confirm in one line. Read the source files with your read/glob tools; the
 prompt tells you which exist and gives you the run timestamp to stamp in.
 
+## 0. First: what day is it, and what window are we covering
+
+**Call the `Today` tool before you read anything else.** Then set the window:
+
+> **window_start = the 15th of `previous_month`.  window_end = `today`.**
+
+The current month plus the tail of the previous one. Nothing outside it belongs in
+the digest — not in action/fyi, not in the money totals, not in the schedule, not in
+the radar. The source agents were told the same rule, so anything older that still
+reaches you is a mistake to drop, not data to report.
+
+Comparing ISO dates is plain string order; you do not need to compute anything
+beyond the window itself.
+
 ## 1. Merge & de-duplicate
 
 Pool every item from every source into one list. Then **de-duplicate the same
@@ -24,18 +38,43 @@ same when their sender and normalized subject match (ignore a leading
 `Re:`/`Fwd:`). Keep one, record BOTH services in its `sources` array, and keep
 the strongest bucket (`action` > `fyi` > `noise`).
 
-## 2. Roll up the money
+## 2. Roll up the money — per currency, with the tool
 
-From every item carrying a `payment`, build the `finance` block. **Add carefully
-— this is the one place a wrong number really hurts.** Sum per currency and
-direction; never mix currencies in one total. Keep amounts as plain numbers.
-The chart is the biggest outflows (`paid`+`charged`+`due`) in the dominant
-currency. See [financial_summary](../financial_summary/SKILL.md).
+Gather every item carrying a `payment` **whose date is inside the window**, and pass
+them all in ONE call to `SumPayments`. Filtering is your job — the tool has no idea
+what today is and will faithfully add up whatever you hand it.
 
-## 3. Order the schedule
+Build `finance` from what it returns. Its `by_currency` is already the shape you
+want: **each currency is a self-contained block holding its own `charges` list and
+its own totals** (`charged`/`paid`/`due`/`refund`, plus `out`, `net`, `count`,
+`subscriptions`). Copy each block through as-is.
 
-Every item with a `meeting` becomes a `schedule` entry, sorted by `start`
-(undated ones last).
+**Do not add the numbers yourself and do not re-derive the totals afterwards.** When
+the totals and the list were produced separately they drifted: a real run reported
+USD `charged: 289.00` against its own list summing to 269.00.
+
+- **Keep currencies apart everywhere** — totals, lists and the terminal digest. There
+  is no exchange rate here, and the tool will never invent one. Two honest totals
+  beat one merged fiction. Order currencies by the size of `out`, biggest first.
+- The chart is the biggest outflows (`out`) within a single currency — never across.
+- If the tool returns `needs_direction` or `ignored`, those payments were NOT counted.
+  Fix the `direction`/`amount` and call again, or leave them out and say so — never
+  fold them into a total by hand.
+
+See [financial_summary](../financial_summary/SKILL.md).
+
+## 3. Order the schedule — upcoming only
+
+Every item with a `meeting` becomes a `schedule` entry, sorted by `start` (undated
+ones last).
+
+**Drop meetings that have already happened.** A schedule is for what is still ahead:
+keep an entry only when its `start` is on or after `today` (from the `Today` tool),
+or when it has no date at all.
+
+This is not hypothetical — a run generated on 2026-08-20 published a schedule of
+2026-06-18, 2026-07-17 and 2026-07-23, every one already past. If nothing is
+upcoming, omit the schedule section entirely rather than filling it with history.
 
 ## 4. Narrate — stories, people, radar
 
@@ -74,6 +113,23 @@ That's the amount/time view, not a duplicate.
 When two messages are genuinely the same thread across sources, you already
 merged them in step 1 — keep the strongest bucket and both `sources`.
 
+## Counts must equal the lists they describe
+
+`counts.action` MUST equal the number of entries in `action`, and `counts.fyi` MUST
+equal the number in `fyi`. Emit the array first, then count it — never state a count
+you did not derive from the list you actually wrote.
+
+`counts.noise` is the exception: noise items are not emitted as an array, so it is a
+plain tally.
+
+`counts.total` MUST equal `action + fyi + noise` exactly. It is the count AFTER
+de-duplication — not the number of items you read out of the source files. If you
+merged two copies of one newsletter into a single item, the total drops by one.
+
+A real run reported `counts: {action: 6, fyi: 8}` while emitting 3 entries in each —
+the dashboard then renders "Needs action (6)" above three cards. If an item is worth
+counting as action, emit it; if it is not worth emitting, do not count it.
+
 ## digest.json schema
 
 ```json
@@ -99,14 +155,19 @@ merged them in step 1 — keep the strongest bucket and both `sources`.
     { "topic": "ruby", "label": "Ruby", "headline": "", "bullets": [], "briefing": "", "count": 0 }
   ],
   "finance": {
-    "by_currency": { "USD": { "charged": 0, "due": 0, "paid": 0, "refund": 0, "count": 0 } },
+    "currencies": ["MXN", "USD"],
+    "by_currency": {
+      "USD": {
+        "charged": 0, "paid": 0, "due": 0, "refund": 0,
+        "out": 0, "net": 0, "count": 0, "subscriptions": 0,
+        "charges": [
+          { "merchant": "", "amount": 0, "currency": "USD",
+            "direction": "charged|paid|due|refund", "kind": "one_time|subscription",
+            "date": "", "subject": "", "source": "" }
+        ]
+      }
+    },
     "dominant_currency": "USD",
-    "charges": [
-      { "merchant": "", "amount": 0, "currency": "USD",
-        "direction": "charged|paid|due|refund", "kind": "one_time|subscription",
-        "date": "", "subject": "", "source": "" }
-    ],
-    "subscriptions": [ { "merchant": "", "amount": 0, "currency": "USD" } ],
     "chart": { "currency": "USD", "bars": [ { "label": "", "amount": 0 } ] }
   },
   "schedule": [
@@ -136,7 +197,9 @@ _<headline>_
 - **<sender>** — <subject>: <the one thing that matters>
 
 ## Money
-<charged/paid/due one-liner per currency> — <n> subscriptions
+### <CURRENCY>
+<charged/paid/due/refund one-liner> — <n> subscriptions
+<repeat one block per currency, biggest `out` first; never merge currencies>
 
 ## Schedule
 - <start> — <title> (<location>) · RSVP

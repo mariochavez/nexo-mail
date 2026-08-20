@@ -114,9 +114,58 @@ attaches the descriptor's tools in `#chat` (`super`, then `with_tools(...)`).
 Apple Mail keeps its own `AppleMailSource` because the `mcp` macro is class-level
 and can't be expressed per-instance.
 
-**HEY has three boxes**, and `HeyBox` takes a `box` param so the agent pulls all
-three: **Imbox** (people → action/fyi), **The Feed** (newsletters → tag topics),
-**Paper Trail** (receipts → extract payments).
+**HEY has four boxes**, and `HeyBox` takes a `boxes` ARRAY so one call returns them
+all: **Imbox** (people → action/fyi), **The Feed** (newsletters → tag topics),
+**Paper Trail** (receipts → extract payments), **Set Aside** (parked mail → fyi).
+The canonical names the model uses (`imbox`, `feed`, `papertrail`, `setaside`) are
+translated by `Tools::Hey::BOXES` into what the CLI actually wants (`imbox`,
+`feedbox`, `trailbox`, `asidebox` — the `kind` field, not the label); an unknown
+name is an explicit error rather than a silent fallback.
+
+**Reads are batched.** `GmailImap::Read` takes `uids: []` and `HeyThread` takes
+`thread_ids: []`, so a body read costs one model round trip instead of N — and for
+Gmail one IMAP session instead of N, since `with_inbox` opens a fresh connection per
+call. Both listings now carry a plain-text `snippet` (Gmail via a grouped partial
+IMAP fetch + MIME decoding, HEY from the `summary` the API already returns), so most
+messages are classified without any body read at all. `Tools::Pool` provides the
+bounded fan-out inside a single tool call.
+
+**Concurrency is fibers end to end.** The workflow already fans its source agents out
+with `Nexo.concurrent` (async); `Tools::Pool` uses `Sync` + `Async::Semaphore`/
+`Barrier` rather than OS threads; and `Config.tool_concurrency` defaults to `:fibers`
+so ruby_llm overlaps multiple tool calls from a single assistant turn on that same
+reactor. This is sound because Async's scheduler hooks `process_wait`/`io_read`/
+`io_wait`, so `Open3.capture3` and `Net::IMAP` yield instead of blocking — four
+`sleep 0.4` subprocesses go 1.64s → 0.41s, and four IMAP connects 0.95s → 0.17s.
+
+The one resource that cannot take concurrency is the `hey` CLI, which races on the
+macOS keyring. `Tools::Hey.run` holds a process-wide fiber-aware `Mutex` around every
+invocation, so the race is impossible regardless of which caller reaches it — that
+lock, not a tuning knob, is what makes the rest of the concurrency safe.
+
+Apple Mail is the exception: `apple-mail-mcp` is a third-party server whose
+`get_email` is one-message-at-a-time and untruncated. `AppleMailSource` wraps its
+gated MCP tools in `Tools::CappedTool` to bound the reply, and the `email_triage`
+skill steers the agent toward `search` (batched, with `content_snippet`) instead of
+repeated `get_email`.
+
+## Where judgment lives
+
+Ruby does I/O and exact arithmetic; every judgment is a skill. Concretely:
+
+| Question | Answered by |
+|---|---|
+| What day is it? | `Tools::Today` — a clock, no opinions |
+| How far back does the briefing reach? | the **skills** (15th of previous month → today), passed to tools as `since:` |
+| Which payments belong in the totals? | the **skills** — the tool adds up whatever it is given |
+| What is 100.00 + 80.00 + 949.00? | `Tools::SumPayments` — BigDecimal, per currency, never converting |
+| Which mail is action / fyi / noise? | the **skills** |
+| How much mail may one call return? | Ruby (`hey_box_limit`, `gmail_list_limit`) — volume, not relevance |
+
+The two deterministic tools exist because both were measurably wrong in the model:
+dates (a schedule of appointments already two months past) and money (`by_currency`
+disagreeing with its own `charges` list). Both are the `PruneSnapshots` carve-out —
+bounded, agent-invoked, and neither parses model output nor writes an artifact.
 
 ## The skills — where the intelligence lives
 

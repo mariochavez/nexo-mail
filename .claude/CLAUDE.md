@@ -12,8 +12,9 @@ Do NOT add Ruby that parses model output, rolls up numbers, renders HTML, or
 formats a digest — express that as a `data/skills/*/SKILL.md` and let an agent do
 it. The lone exception: a bounded, correctness-critical primitive may be a thin
 Ruby **tool** the agent *calls* (e.g. `PruneSnapshots` deletes dirs
-deterministically; the agent decides *to* call it). Accepted tradeoff: money
-arithmetic runs in the model now, not Ruby.
+deterministically; the agent decides *to* call it). Money arithmetic USED to run in the
+model; it was measurably wrong, so it now runs in `Tools::SumPayments`, which the
+agent calls — the carve-out, not an exception to it.
 
 ## Commands
 
@@ -49,7 +50,9 @@ lib/nexo_mail/
   agents/                   # SourceAgent base + EmailSource (data-driven, tool-based
                             #   Gmail/HEY) + AppleMailSource (MCP), Synthesize (digest),
                             #   Publisher (dashboard), Archivist
-  tools/                    # CliReader, HeyBox/HeyThread, GmailImap(::List/::Read),
+  tools/                    # CliReader, Pool, Hey/HeyBox/HeyThread, CappedTool,
+                            #   Today, SumPayments (deterministic primitives),
+                            #   GmailImap(::List/::Read/::Mime/::BodyPart),
                             #   ArchiveRun, PruneSnapshots
   workflows/                # MultiInboxTriage < Nexo::Workflow (orchestration only)
 data/                       # PACKAGED: config.example.toml, skills/, themes/, prompts/
@@ -74,7 +77,8 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
    `interest_radar`.
 3. **Publisher** renders `dashboard.html` by RUNNING the `dashboard_designer`
    skill's bundled `scripts/render_dashboard.rb` over `assets/dashboard-template.html`
-   + `digest.json` (the workflow stages both into the sandbox first). The design is
+   + `digest.json` (the workflow STAGES the skill's `scripts/`+`assets/` into the
+   sandbox first, so the agent's gated read/glob tools can reach them). The design is
    a fixed, versioned template rendered deterministically — the model does NOT author
    HTML. Editing the look = editing the template, not the skill prose.
 4. **Archivist** archives the run + prunes old snapshots via the `ArchiveRun` /
@@ -132,6 +136,27 @@ parses no JSON, renders nothing.
   run the bundled dashboard render script — it reaches NO mail (no mail tools). Every
   mail-reading agent stays `:read_only` with no shell (verify:
   `GmailSource.permissions.authorize!(:shell)` raises; `Publisher`'s does not).
+- **Skill-bundled files are AUTO-RESOLVED, never path-joined.** `scripts/`,
+  `assets/`, `references/` is *ruby_llm-skills'* convention, and `Nexo::Skills.find`
+  already returns a `Skill` exposing `#scripts`/`#assets`. `Config.skill_script` /
+  `#skill_asset` wrap that; `dashboard_renderer`/`dashboard_template` take the SKILL
+  as an argument and the workflow passes `Agents::Publisher.skills.first`. Nothing
+  names a skill or a filename outside the agent's own `@skills`, so renaming either
+  needs no code change — verified by renaming both the skill dir and its files.
+  A new script-bearing skill needs NO Config accessor.
+  **Nexo deliberately does not attach the gem's `SkillTool`** (it does ungated
+  `File.read`), and `Sandboxes::Local` is SINGLE-ROOTED — every read/glob/write is
+  guarded against one `cwd` — so a skill's files are invisible to the gated tools
+  while they live outside the sandbox.
+- **The workflow STAGES skill resources into the sandbox** (`stage_skill_resources`),
+  copying every `scripts/`+`assets/` file the skill ships and preserving that layout,
+  so the render command is workspace-relative and the agent can `glob scripts/*`
+  through its permission-gated tools. **Accepted tradeoff:** the Publisher holds
+  `:write` AND `:shell`, so a staged script sits in space it could rewrite before
+  executing — outside the sandbox it could not be touched at all. Mitigation: we
+  re-stage (overwriting) on EVERY run immediately before the agent runs, so tampering
+  cannot persist across runs; the residual window is a single turn. A `[dashboard]`
+  override is used as an absolute path instead and is never staged.
 - **The dashboard is a skill-owned template, not model-authored HTML.** The design +
   render live in `data/skills/dashboard_designer/{assets/dashboard-template.html,
   scripts/render_dashboard.rb}` (seeded to `skills_dir`). The Publisher pulls them
@@ -143,9 +168,72 @@ parses no JSON, renders nothing.
   a narrowed PATH and bare `ruby` may not resolve. Deterministic + XSS-safe (the script
   escapes the JSON blob). To restyle, repoint `template` / edit the template — never
   the app's Ruby, never the skill prose.
-- **HEY has THREE boxes** — `imbox` (people → action/fyi), `feed` (newsletters →
-  tag `topics`), `papertrail` (receipts → extract `payment`). The `HeyBox` tool
-  takes a `box` param; the skill tells the agent to pull all three.
+- **HEY has FOUR boxes, and the CLI name is the `kind`, not the label.**
+  `NexoMail::Tools::Hey::BOXES` maps what the model says → what `hey box` wants:
+  `imbox`→`imbox` (people → action/fyi), `feed`→`feedbox` (newsletters → tag
+  `topics`), `papertrail`→`trailbox` (receipts → extract `payment`),
+  `setaside`→`asidebox` (parked mail → usually fyi). `HeyBox` takes a `boxes`
+  ARRAY and returns all of them in one call. An unknown name is an explicit error
+  — never a silent fallback to the Imbox, which is how The Feed and Paper Trail
+  went untriaged. Box *ids* are per-account; only the `kind` strings are stable.
+- **`hey threads` wants the TOPIC id, not the posting `id`.** The topic id lives
+  only inside `posting["app_url"]` (`https://app.hey.com/topics/<TOPIC_ID>`) and is
+  a different number; reading by posting id always 404s. `Hey.thread_id` parses it,
+  the listing exposes it as `thread_id`, and a `kind: "bundle"` posting (app_url
+  `/contacts/…`) has none — it simply cannot be read.
+- **`hey` cannot be called concurrently — `Tools::Hey::LOCK` is the invariant.**
+  It serializes on the macOS keyring, so parallel invocations race and every loser
+  exits 3 with "not logged in" (measured: 1 in flight → 12/12 ok, 2 → 9/12,
+  3 → 6/12, 4 → 3/12). EVERY `hey` invocation goes through `Tools::Hey.run`, which
+  holds a process-wide `Mutex` for the whole subprocess — so no caller can race it:
+  not a `Pool` fan-out, not two tool calls running together, not the `Sources`
+  availability probe. With the lock in place the same 8-way fan-out is 8/8. Never
+  shell out to `hey` directly; add it to `Hey.run`.
+- **Concurrency here is fibers, not threads.** `Config.tool_concurrency` defaults to
+  **`:fibers`**, so ruby_llm overlaps multiple tool calls from one turn on async —
+  the same reactor `Nexo.concurrent` already runs the source agents in.
+  `Tools::Pool` (the in-tool fan-out) is `Sync` + `Async::Semaphore`/`Barrier` for
+  the same reason. This works because Async's scheduler hooks `process_wait`,
+  `io_read` and `io_wait`: `Open3.capture3` and `Net::IMAP` both YIELD rather than
+  block (measured: 4×`sleep 0.4` 1.64s → 0.41s; 4 IMAP connects 0.95s → 0.17s).
+  Ruby's `Mutex` is fiber-aware, so `Hey::LOCK` yields instead of deadlocking the
+  reactor. `async` is a hard dep of nexo_mail but only a SOFT one of nexo_ai.
+- **The read tools are BATCHED and return JSON STRINGS.** `GmailImap::Read` takes
+  `uids: []`, `HeyThread` takes `thread_ids: []` — one model round trip instead of
+  N, and for Gmail one IMAP session instead of N. Both listings carry a `snippet`
+  so most messages never need a body read at all. Every tool returns
+  `JSON.generate(...)`: ruby_llm `to_s`-es a non-Content result (`chat.rb:383`), so
+  a Hash would reach the model as Ruby `inspect`, not JSON.
+- **The run window is the AGENT's, not Ruby's.** Ruby holds no date policy at all:
+  `Tools::Today` is a clock (today, month bounds, previous_month — no judgments),
+  and the `email_triage` / `inbox_synthesis` skills define the window as *the 15th
+  of `previous_month` → today* and pass it to the tools as `HeyBox(since:)` /
+  `GmailImap::List(since:)`. Ruby bounds VOLUME only (`hey_box_limit`,
+  `gmail_list_limit`); relevance is a judgment and lives in the skills. Omitting
+  `since` means no date filter — deliberately, so the policy has exactly one home.
+- **The model does NOT know the date, and it showed.** A run generated 2026-08-20
+  published a schedule of 2026-06-18 / 2026-07-17 / 2026-07-23 — every appointment
+  already past — and reported 2023 receipts as June charges. The fix is the `Today`
+  tool plus a skill rule to call it FIRST; there is no date injected into prompts.
+- **Money arithmetic is a TOOL now, not the model** — this reverses the old
+  "accepted tradeoff". `Tools::SumPayments` (attached to `Synthesize`) is a pure
+  calculator: BigDecimal addition, grouped per currency, NEVER converting between
+  them, and it makes no judgments — it does not know the date, does not filter, and
+  refuses to guess a direction (unrecognised ones come back in `needs_direction`,
+  uncounted). Each currency is a self-contained block holding its own `charges` list
+  AND the totals of that list, so the two cannot drift — they did: a run reported USD
+  `charged: 289.00` against its own list summing to 269.00 (true figure 1218.00), and
+  MXN `refund: 7,979.84` against 7,899.98 with `count: 5` for four entries.
+- **Never merge currencies.** There is no FX rate anywhere in this project. The
+  dashboard template used to sum `charged`/`due`/`paid` ACROSS currencies and label
+  the result with the dominant one; it now renders one block per currency. Money is
+  separated by currency in `SumPayments`, in `digest.json`'s `finance.by_currency`,
+  in the dashboard, and in `inbox-digest.md`.
+- **Read shaping is config, and it is the only real bound.** The `[read]` block /
+  `NEXO_MAIL_*` vars (see `Config.read_int`) cap list size, snippet length, batch
+  size and body length. The workflow's `max_turns:` is INERT — `Nexo::Loops::RubyLLM`
+  accepts and ignores it — so these caps plus the skill's two-read budget are all
+  that stands between you and a runaway read loop.
 - **Snapshots live in `Config.snapshots_dir`** (state), separate from the sandbox.
   Because the sandbox is fenced, agents reach snapshots ONLY via the `ArchiveRun` /
   `PruneSnapshots` tools. Each run archives `digest.json` + `dashboard.html` +

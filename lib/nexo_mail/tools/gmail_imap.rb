@@ -47,6 +47,15 @@ module NexoMail
         {error: "Gmail IMAP error: #{e.class}: #{e.message}"}
       end
 
+      # Pulls the body out of a FETCH response WITHOUT constructing the key. net-imap
+      # echoes back whatever the server sent, so a partial fetch answers under
+      # "BODY[TEXT]<0>" while a plain one answers under "BODY[TEXT]" — find whichever
+      # arrived rather than guessing, which is a silent nil when guessed wrong.
+      def raw_body(data)
+        _key, value = data.attr.find { |k, _| k.to_s.start_with?("BODY[") }
+        value
+      end
+
       # Format an IMAP ENVELOPE address struct as "Name <mailbox@host>".
       def format_address(addr)
         return nil unless addr

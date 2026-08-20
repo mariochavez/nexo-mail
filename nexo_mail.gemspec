@@ -21,7 +21,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Agent harness + LLM stack.
-  spec.add_dependency "nexo_ai", "~> 0.7"
+  spec.add_dependency "nexo_ai", "~> 0.8", ">= 0.8.1"
   spec.add_dependency "ruby_llm-mcp"
   spec.add_dependency "ruby_llm-skills"
   spec.add_dependency "zeitwerk"

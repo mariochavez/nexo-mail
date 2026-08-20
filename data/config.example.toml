@@ -52,11 +52,12 @@ flavor = "mocha"
 # snapshots_keep = 20
 
 # ── Dashboard ───────────────────────────────────────────────────────────────
-# The Publisher renders dashboard.html from a template + a render script, pulled
-# from these paths at run time. Defaults point at the dashboard_designer skill's
-# bundled assets (seeded under skills_dir). Point `template` at your own HTML to
-# restyle the dashboard without touching the gem — the render script injects the
-# run's digest.json into the template's `__DIGEST_JSON__` placeholder.
+# The Publisher renders dashboard.html from a template + a render script. Both are
+# AUTO-RESOLVED from the skill the Publisher declares — ruby_llm-skills finds that
+# skill's assets/ and scripts/ — so you only need these settings to OVERRIDE them.
+# Point `template` at your own HTML to restyle the dashboard without touching the
+# gem; the render script injects the run's digest.json into the template's
+# `__DIGEST_JSON__` placeholder.
 # The Publisher runs the render script inside a sandbox shell with a narrowed PATH.
 # If your Ruby is version-managed (mise/asdf/rbenv) and `ruby` won't resolve there,
 # pin `ruby` to an absolute interpreter path.
@@ -64,6 +65,39 @@ flavor = "mocha"
 # ruby     = "ruby"
 # template = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/assets/dashboard-template.html"
 # renderer = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/scripts/render_dashboard.rb"
+
+# ── Reading (optional) ──────────────────────────────────────────────────────
+# How much mail the source tools pull, and how much of each message they hand
+# the model. Every value is clamped, and a non-numeric value falls back to the
+# default. Each also has a NEXO_MAIL_<UPPERCASE_KEY> env var that wins over the
+# TOML.
+#
+# The listings already carry a snippet, so triage rarely needs to open a
+# message — these caps are what keep a run from turning into one tool call per
+# email. Lower them on a small-context model; raise them for a fuller picture.
+# [read]
+# gmail_list_limit      = 40      # messages in one INBOX listing        (1..200)
+# gmail_snippet_chars   = 400     # snippet per listed message; 0 = off  (0..2000)
+# gmail_read_max_uids   = 25      # UIDs one batched body read accepts   (1..100)
+# gmail_body_chars      = 4000    # body chars per message read          (200..20000)
+# hey_box_limit         = 40      # postings per HEY box                 (1..200)
+# hey_snippet_chars     = 200     # HEY caps its own summary at 200      (0..1000)
+# hey_thread_max_ids    = 15      # ids one batched thread read accepts  (1..50)
+# hey_body_chars        = 4000    # body chars per HEY thread entry      (200..20000)
+# hey_payload_max_chars = 40000   # ceiling on a whole thread-read reply (4000..200000)
+# hey_concurrency       = 1       # `hey` fan-out tasks per tool call (1..8)
+#                                 # Leave at 1: `hey` cannot run concurrently (it
+#                                 # races on the macOS keyring), so nexo_mail holds
+#                                 # a mutex across every invocation. Raising this
+#                                 # only queues fibers behind that lock.
+#
+# How ruby_llm runs MULTIPLE tool calls emitted in one assistant turn:
+#   "fibers"  (default) — via async, the same reactor the sources fan out in
+#   "threads"           — OS threads
+#   "off"               — one at a time
+# tool_concurrency      = "fibers"
+# apple_body_chars      = 4000    # cap Apple Mail MCP's untruncated body (200..20000)
+
 
 # ── Paths (optional) ────────────────────────────────────────────────────────
 # Defaults follow XDG:

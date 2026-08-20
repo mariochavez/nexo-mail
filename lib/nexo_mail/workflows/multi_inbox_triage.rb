@@ -27,7 +27,7 @@ module NexoMail
         return {sources: [], skipped: skipped, files: []} if produced.empty?
 
         drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
-        drive_agent(Agents::Publisher, "publisher", publisher_prompt)
+        drive_agent(Agents::Publisher, "publisher") { |agent| publisher_prompt(agent) }
         drive_agent(Agents::Archivist, "archivist", archivist_prompt)
 
         {sources: produced.keys, skipped: skipped, files: produced.values,
@@ -90,11 +90,18 @@ module NexoMail
 
       # Run a single downstream agent, forwarding its events; a failure is logged and
       # swallowed so the pipeline continues with whatever the earlier stages produced.
-      def drive_agent(klass, tag, prompt)
+      # +prompt+ is either a ready string or a block taking the built agent — the
+      # publisher needs the latter, because it stages the skill's files into that
+      # agent's own sandbox before telling it what to run. A nil prompt means the
+      # stage declined and already emitted why.
+      def drive_agent(klass, tag, prompt = nil)
         started = clock
         emit(:"#{tag}_started")
         agent = klass.new(cwd: Config.sandbox_dir)
-        agent.prompt(prompt, max_turns: 12) { |type, payload| forward_event(tag, type, payload) }
+        text = block_given? ? yield(agent) : prompt
+        return if text.nil?
+
+        agent.prompt(text, max_turns: 12) { |type, payload| forward_event(tag, type, payload) }
         emit(:"#{tag}_done", ms: ms_since(started))
       rescue => e
         emit(:"#{tag}_failed", error: e.message, ms: ms_since(started))
@@ -109,17 +116,54 @@ module NexoMail
           "Build the digest per the skill: write `digest.json` and `inbox-digest.md`."
       end
 
-      # The Publisher pulls the render script + template from the CONFIGURED paths
-      # (Config.dashboard_renderer/template — default: the seeded skill assets,
-      # overridable via [dashboard] in config.toml) and renders in one shell call.
-      # digest.json is read from the workspace; dashboard.html is written there.
-      def publisher_prompt
-        renderer = Config.dashboard_renderer
-        template = Config.dashboard_template
-        "Render the dashboard per the dashboard_designer skill, with the shell tool. " \
-          "Run exactly:\n\n" \
+      # Stages the Publisher's skill resources INTO the sandbox, then builds the
+      # render command against them. Everything the agent touches is therefore inside
+      # the sandbox and reachable through Nexo's permission-gated read/glob tools —
+      # skill files otherwise live outside it and are invisible to those tools.
+      #
+      # Which skill, and which files: entirely dynamic. The agent's own `skills`
+      # declaration is the single source of truth, and ruby_llm-skills (via
+      # Nexo::Skills) enumerates its scripts/ and assets/. Nothing here names a skill
+      # or a filename. [dashboard] in config.toml still overrides either path, in
+      # which case that absolute path is used as-is rather than staged.
+      #
+      # SECURITY — accepted tradeoff. The Publisher holds :write AND :shell, so a
+      # staged script sits in space it can rewrite before executing; kept outside the
+      # sandbox it could not be tampered with at all. Mitigation: we re-stage (and
+      # overwrite) on EVERY run, immediately before the agent runs, so tampering can
+      # never persist across runs. The residual window is one turn, by a script the
+      # agent is told to run verbatim.
+      def publisher_prompt(agent)
+        skill = Agents::Publisher.skills.first
+        staged = stage_skill_resources(skill, agent.sandbox)
+        renderer = Config.dashboard_renderer(skill) { staged[:scripts]&.first }
+        template = Config.dashboard_template(skill) { staged[:assets]&.first }
+        unless renderer && template
+          emit(:publisher_failed, error: "the #{skill} skill ships no #{renderer ? "asset" : "script"} to render with")
+          return nil
+        end
+
+        "Render the dashboard per the #{skill} skill, with the shell tool. Its script " \
+          "and template have been staged into your workspace, so you can read or glob " \
+          "them if you need to. Run exactly:\n\n" \
           "  #{Config.dashboard_ruby} #{renderer.inspect} digest.json #{template.inspect} dashboard.html\n\n" \
           "Then confirm in one line. Do not hand-write the HTML."
+      end
+
+      # Copies every file the skill ships into the sandbox, preserving the
+      # scripts//assets/ layout so the agent can glob `scripts/*` the way the skill's
+      # own prose describes. Returns workspace-relative paths grouped by kind.
+      #
+      # Nexo::Skills.materialize does this through the SANDBOX's own #write, so it
+      # works on :local, :docker/:apple and :remote alike — a plain FileUtils.cp (what
+      # this used to be) only ever worked on :local, and on a container it copied to a
+      # host directory the agent could not see. Overwrites each run, which is what
+      # bounds tampering with a staged script to a single turn. Never fatal.
+      def stage_skill_resources(skill, sandbox)
+        Nexo::Skills.materialize(skill, into: sandbox, kinds: %i[scripts assets])
+      rescue => e
+        emit(:staging_failed, skill: skill.to_s, error: e.message)
+        {}
       end
 
       def archivist_prompt

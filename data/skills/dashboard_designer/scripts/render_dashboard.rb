@@ -24,7 +24,10 @@ abort "render_dashboard: #{template_path} not found" unless File.exist?(template
 # Parse to validate, then re-serialize compactly (so a pretty-printed digest.json
 # still embeds cleanly). A malformed digest is fatal here — better to fail loudly
 # than to ship a broken dashboard.
-data = JSON.parse(File.read(digest_path))
+# Read as UTF-8 EXPLICITLY. A bare File.read uses the ambient default external
+# encoding, which is US-ASCII wherever LANG is unset — e.g. inside a container —
+# and any accent in the digest then raises Encoding::InvalidByteSequenceError.
+data = JSON.parse(File.read(digest_path, encoding: "UTF-8"))
 
 # `ascii_only: true` escapes every non-ASCII char (accents, arrows, emoji) to \uXXXX,
 # so the blob is pure ASCII and renders correctly no matter how the browser guesses
@@ -33,7 +36,7 @@ data = JSON.parse(File.read(digest_path))
 # <script type="application/json"> (neutralizing `<` defeats a `</script>` breakout).
 safe = JSON.generate(data, ascii_only: true).gsub(/[<>&  ]/) { |c| format("\\u%04x", c.ord) }
 
-template = File.read(template_path)
+template = File.read(template_path, encoding: "UTF-8")
 unless template.include?("__DIGEST_JSON__")
   abort "render_dashboard: template is missing the __DIGEST_JSON__ placeholder"
 end

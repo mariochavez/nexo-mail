@@ -3,9 +3,11 @@
 module NexoMail
   module Agents
     # Publishes the dashboard. The design and the render live in the
-    # dashboard_designer SKILL (a fixed template + a render script); the workflow
-    # stages both into the workspace, and this agent RUNS the script with the Shell
-    # tool to produce a byte-identical `dashboard.html` from `digest.json`.
+    # dashboard_designer SKILL (a fixed template + a render script). The workflow
+    # STAGES both into the workspace before this agent runs — so they are reachable
+    # through its permission-gated read/glob tools, which skill files outside the
+    # sandbox are not — and this agent RUNS the script with the Shell tool. Every
+    # path in the command is workspace-relative.
     #
     # SECURITY — deliberate, scoped exception to the app's read-only-by-construction
     # guarantee: the Publisher is the ONLY agent granted `:shell`. It reaches no mail
