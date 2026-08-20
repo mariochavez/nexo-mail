@@ -70,12 +70,26 @@ off, an invitation whose time you need, a genuinely ambiguous sender.
 - **HEY** — `thread_id` is NOT the same number as `id`. Read with `thread_id`;
   `id` is only for de-duplication. A posting with no `thread_id` (a bundled
   contact posting) has no readable body — classify it from the snippet alone.
-- **Apple Mail** — the only source with no batched body read. Use `get_emails`
-  once for the listing. When several messages need text, prefer **`search`** —
-  it returns a `content_snippet` for many messages in one call, and takes
-  `after`/`mailbox` filters — over calling `get_email` repeatedly. `get_email`
-  is one message per call, so treat it as the last resort and keep it inside the
-  two-call budget.
+- **Apple Mail** — the only source with no batched body read, and the one that
+  runs away if you let it. A measured run made **48 mail calls** (27 × `search`,
+  9 × `get_emails`, 8 × `get_email`, 4 × `list_mailboxes`) where six would have
+  done, and took longer than the other two inboxes put together. So the budget
+  here is hard, not a preference. Count as you go:
+  - `list_accounts` / `list_mailboxes` — **do not call them.** Triage the inbox
+    you were given. Discovering the mailbox layout tells you nothing about
+    today's mail.
+  - `get_emails` — **once.** That is your listing.
+  - `search` — **at most twice**, always with `after:` set to the window start.
+    It returns a `content_snippet` for many messages in one call, which is the
+    only reason to prefer it over `get_email`. A third search means you are
+    exploring, not reading.
+  - `get_email` — **at most twice.** One message per call, so it is the last
+    resort, not the habit.
+
+  Six mail calls is a complete Apple Mail triage. If something is still unclear
+  after that, classify it from what you have and move on: past this point the run
+  is only getting slower, and an item with an honest `summary` and no `payment`
+  is worth more than another round trip.
 
 ## The deliverable: a JSON array
 
