@@ -17,6 +17,14 @@ module NexoMail
     # that errors mid-run degrades to "no file"; and each later stage is best-effort,
     # so a failing synthesis/publisher/archivist never sinks the whole run.
     class MultiInboxTriage < Nexo::Workflow
+      # The workflow shares the agents' workspace, so `artifact(path:)` reads the
+      # very files they wrote. `cwd` is a lazy READER override, not the macro's
+      # setter: Config is not loaded until CLI.run, and Nexo resolves the sandbox on
+      # first touch, so reading it here defers the lookup to exactly the right
+      # moment. Nothing else in this class touches the filesystem.
+      sandbox :local
+      def self.cwd = Config.sandbox_dir
+
       def call(payload)
         stamp = (payload || {})[:generated_at] || Time.now.utc
 
@@ -31,6 +39,7 @@ module NexoMail
         drive_agent(Agents::Archivist, "archivist", archivist_prompt)
 
         {sources: produced.keys, skipped: skipped, files: produced.values,
+         artifacts: @run.artifacts.map { |a| a["name"] }.uniq,
          snapshot: Snapshots.list.first}
       end
 
@@ -73,6 +82,7 @@ module NexoMail
         ) { |type, payload| forward_event(name, type, payload) }
 
         if File.exist?(File.join(Config.sandbox_dir, file))
+          record_artifact(file)
           emit(:source_done, source: name, ms: ms_since(started))
           [name, file]
         else
@@ -103,10 +113,45 @@ module NexoMail
 
         agent.prompt(text, max_turns: 12) { |type, payload| forward_event(tag, type, payload) }
         emit(:"#{tag}_done", ms: ms_since(started))
+      rescue Nexo::EnvironmentError => e
+        # The agent declared what its sandbox must provide (`requires`) and the
+        # sandbox does not provide it. Distinct from a model/tool failure and worth
+        # its own event: the fix is provisioning, not a retry.
+        emit(:"#{tag}_failed", error: e.message, ms: ms_since(started), unmet: true)
       rescue => e
         emit(:"#{tag}_failed", error: e.message, ms: ms_since(started))
       ensure
+        # Record whatever the agent DECLARED it produces, on every path — including
+        # the failure paths above, because a stage that died after writing its file
+        # still produced it. Nexo skips a declared artifact that was never written.
+        collect_declared(agent, tag)
         agent&.close
+      end
+
+      # ---- artifacts (nexo_ai >= 0.9) -------------------------------------------
+
+      # Copy the agent's DECLARED outputs (`produces`) onto the run record. Nexo
+      # reads each name through this workflow's sandbox and stores the bytes on the
+      # run, so a deliverable outlives the workspace that held it — and so a caller
+      # driving this workflow as a library gets the artifacts back without knowing
+      # where on disk we happened to write them. Never fatal.
+      def collect_declared(agent, tag)
+        return unless agent
+
+        collected = collect_artifacts(agent)
+        emit(:artifacts_collected, stage: tag, names: collected.map { |a| a["name"] }) unless collected.empty?
+      rescue => e
+        emit(:artifact_skipped, stage: tag, error: e.message)
+      end
+
+      # The source agents can't use `produces`: one EmailSource CLASS serves every
+      # tool-based inbox, and the filename comes from the per-instance descriptor.
+      # So record this one by path — the same verbatim, no-ERB copy `produces` uses
+      # underneath. Never fatal: an unrecorded artifact must not fail a good run.
+      def record_artifact(file)
+        artifact(file, path: file)
+      rescue => e
+        emit(:artifact_skipped, file: file, error: e.message)
       end
 
       def synthesis_prompt(produced, stamp)

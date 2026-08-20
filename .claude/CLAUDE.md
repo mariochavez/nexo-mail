@@ -116,6 +116,35 @@ parses no JSON, renders nothing.
   Nexo's `inherited` copies `@skills` (a CONFIG_IVAR) to the subclass, and the
   `skills` *macro only accumulates* — so `skills :x` would ADD to the inherited
   extraction skills instead of replacing them. `instructions`, by contrast, replaces.
+- **Agents DECLARE their output with `produces`; the workflow records it** (nexo_ai
+  >= 0.9). `Synthesize` produces `digest.json` + `inbox-digest.md`, `Publisher`
+  produces `dashboard.html`, and `MultiInboxTriage` calls `collect_artifacts(agent)`
+  in `drive_agent`'s **ensure** — so a stage that wrote its file and then failed still
+  gets recorded. The source agents can't use `produces` (one `EmailSource` CLASS
+  serves every descriptor, and the filename is per-instance), so the workflow records
+  those with `artifact(file, path: file)` — the `path:` mode, a verbatim copy, NOT
+  `from:` which is ERB and would execute model-written content. Both are wrapped so a
+  failure emits `artifact_skipped` and never sinks the run. This is what puts the
+  deliverables on `run.artifacts`, durable independently of the sandbox dir.
+  **The workflow needs `sandbox :local` + a lazy `def self.cwd = Config.sandbox_dir`**
+  for any of it to work — `Nexo::Workflow`'s sandbox defaults to `:virtual`, where the
+  agents' files do not exist. `cwd` is a READER override, not the macro's setter,
+  because Config isn't loaded until `CLI.run`.
+- **`Publisher` declares `requires commands: {"ruby" => ">= 3.0"}`** (nexo_ai >= 0.9).
+  Nexo probes the agent's own sandbox once before the first turn and raises
+  `Nexo::EnvironmentError` — so a narrowed-PATH `ruby: command not found` becomes a
+  legible failure instead of a wasted turn. Provisioning is the OPERATOR's job, not
+  this app's: keep the declaration to plain command names, don't try to work around a
+  missing interpreter, and let it fail. `--check` runs the same probe
+  (`CLI#print_sandbox_check`) so the gap shows up before a run. `drive_agent` rescues
+  `Nexo::EnvironmentError` separately and tags the event `unmet: true` — the fix is
+  provisioning, not a retry.
+- **A skill states its needs in `compatibility:`** — the Agent Skills spec's own
+  frontmatter field, which nexo_ai >= 0.9 appends to the model's instructions.
+  `dashboard_designer` uses it to say it needs a Ruby 3.0+ interpreter and the shell
+  tool, and that there is no fallback. Subject to the SAME seed-once gotcha as the
+  rest of the skill: editing `data/skills/*/SKILL.md` does not reach an existing
+  install — `cp` it over `Config.skills_dir`.
 - **`SourceAgent.configure_model!` has a hardcoded roster** of every triage class
   (`[SourceAgent, EmailSource, AppleMailSource, Synthesize, Publisher, Archivist]`).
   Add any NEW agent CLASS here or it runs with no model/provider set. A new
@@ -285,5 +314,5 @@ parses no JSON, renders nothing.
 
 ## Dependencies
 
-`nexo_ai ~>0.7`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
+`nexo_ai ~>0.9`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
 `toml-rb`, `async ~>2.0`, `lipgloss`, `glamour`. Requires Ruby **3.3+**.

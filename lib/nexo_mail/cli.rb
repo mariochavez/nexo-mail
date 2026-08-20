@@ -166,8 +166,23 @@ module NexoMail
       puts "  #{brand.render("dashboard")}  #{File.exist?(dash) ? dash : dim.render("(not produced)")}"
       puts "  #{brand.render("data")}       #{File.exist?(json) ? json : dim.render("(not produced)")}"
       puts "  #{brand.render("snapshot")}   #{snap || dim.render("(not written)")}"
+      print_run_artifacts(run)
       puts "  #{dim.render("open the dashboard →")} #{dim.render("open #{dash}")}" if File.exist?(dash)
     end
+
+    # What the run itself carries. Every agent DECLARES its outputs (`produces`) and
+    # the workflow copies them onto the run record, so these bytes are durable
+    # independently of the workspace — that is what a caller embedding this workflow
+    # gets back, and what would survive an ephemeral (container) sandbox.
+    def print_run_artifacts(run)
+      arts = run.artifacts
+      return if arts.nil? || arts.empty?
+
+      names = arts.map { |a| "#{a["name"]} #{dim.render(size(Nexo::Workflow.artifact_body(a).bytesize))}" }
+      puts "  #{brand.render("recorded")}   #{dim.render("#{arts.size} artifacts on the run —")} #{names.join(dim.render(", "))}"
+    end
+
+    def size(bytes) = (bytes < 1024) ? "#{bytes}B" : "#{(bytes / 1024.0).round}KB"
 
     def artifact_path(name) = File.join(Config.sandbox_dir, name)
     def read_artifact(name) = ((p = artifact_path(name)) && File.exist?(p)) ? File.read(p) : nil
@@ -210,8 +225,48 @@ module NexoMail
         status = reason ? "#{dim.render("⊘")} #{dim.render(reason)}" : ok.render("✓ ready")
         puts "  #{brand.render(descriptor.name.ljust(11))} #{status}"
       end
+      print_sandbox_check
       puts
       exit 0
+    end
+
+    # Ask the sandbox what it actually has, and check it against what the Publisher
+    # DECLARES it needs (Agents::Publisher.requires). This is the same probe Nexo
+    # runs before that agent's first turn — surfacing it here turns a mid-run "ruby:
+    # command not found" into a preflight line, which matters because the sandbox
+    # shell runs with a narrowed PATH and a version-managed ruby often is not on it.
+    # Purely diagnostic: nothing here is fatal.
+    def print_sandbox_check
+      required = Agents::Publisher.requires[:commands]
+      env = Nexo::Sandboxes.resolve(:local, cwd: Config.sandbox_dir)
+        .environment(commands: required.keys)
+      puts
+      puts "  #{brand.render("sandbox".ljust(11))} #{dim.render(Config.sandbox_dir)}"
+      if env[:error]
+        puts "  #{" " * 11} #{bad.render("✗ could not inspect: #{env[:error]}")}"
+        return
+      end
+
+      required.each { |name, want| puts "  #{" " * 11} #{command_line(name, want, env[:commands][name.to_s])}" }
+      puts "  #{" " * 11} #{dim.render("locale #{env[:locale] || "(unset)"}")}"
+    rescue => e
+      puts "  #{brand.render("sandbox".ljust(11))} #{dim.render("probe unavailable: #{e.message}")}"
+    end
+
+    # One "does the sandbox have this, at a good enough version" line.
+    def command_line(name, want, found)
+      label = File.basename(name.to_s)
+      unless found
+        hint = name.to_s.start_with?("/") ? "no such executable there" : "pin [dashboard] ruby to an absolute path"
+        return bad.render("✗ #{name} not reachable from the sandbox shell — #{hint}")
+      end
+
+      version = found[:version].to_s
+      good = version.empty? || Gem::Requirement.new(want.to_s).satisfied_by?(Gem::Version.new(version))
+      detail = dim.render([version, found[:path]].reject { |v| v.to_s.empty? }.join(" "))
+      good ? "#{ok.render("✓")} #{label} #{detail}" : bad.render("✗ #{label} #{version} does not satisfy #{want}")
+    rescue ArgumentError
+      "#{ok.render("✓")} #{label} #{dim.render(found[:path])}"
     end
 
     # ---- --prune-snapshots --------------------------------------------------

@@ -77,6 +77,17 @@ concurrently, a per-source outcome summary (`✓` done · `✗` failed · `⊘` 
 reasons), and the unified digest rendered as markdown into
 `$XDG_STATE_HOME/nexo-mail/sandbox/inbox-digest.md`.
 
+Each agent **declares** what it produces, so the run itself carries the deliverables
+(`digest.json`, `inbox-digest.md`, `dashboard.html`, the per-source extractions) —
+not just the directory they happened to land in. The last line of a run tells you
+what was recorded.
+
+`--check` also probes the **sandbox**, not only your services: the render stage needs
+a Ruby interpreter reachable from the sandbox shell, which runs with a narrowed
+`PATH`, so a version-managed `ruby` (mise/asdf/rbenv) may not resolve there even
+though it resolves in your terminal. If it doesn't, preflight says so and you pin
+`[dashboard] ruby` to an absolute path — the run fails fast rather than half-working.
+
 ## Customize
 
 - **Classification & VIP senders** — edit `~/.config/nexo-mail/skills/email_triage/SKILL.md`
@@ -95,6 +106,8 @@ reasons), and the unified digest rendered as markdown into
 - **Fenced writes.** Agents run a `:local` sandbox rooted at the XDG sandbox dir;
   path traversal and symlink escapes are rejected.
 - **Least privilege.** Every agent runs under `:read_only` with only `:read/:glob/:write`.
+  The Publisher alone also gets `:shell`, purely to run the bundled render script; it
+  attaches no mail tools at all.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 

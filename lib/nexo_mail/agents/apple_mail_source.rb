@@ -30,7 +30,7 @@ module NexoMail
       # we do not own.
       #
       # NOTE: #apply_mcp is a Nexo::Agent internal, not a published extension point —
-      # re-check it on any nexo_ai upgrade (pinned ~> 0.7). If it ever stops being
+      # re-check it on any nexo_ai upgrade (verified against ~> 0.9). If it ever stops being
       # called, the failure is loud: Apple Mail loses its tools entirely rather than
       # silently losing the cap.
       def apply_mcp(chat)

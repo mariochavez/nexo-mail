@@ -1,6 +1,7 @@
 ---
 name: dashboard_designer
 description: Produce the HTML dashboard for a triage run by RUNNING this skill's bundled render script over digest.json. The design is a fixed, versioned template ("Inbox Briefing" — a calm, modern, glanceable dashboard) rendered deterministically, so every run looks identical and is XSS-safe. Do not hand-write HTML.
+compatibility: Needs a Ruby 3.0+ interpreter reachable from the sandbox shell, and the shell tool to run it. Without those, say so and stop — there is no fallback and hand-authored HTML is not one.
 ---
 
 # Dashboard Designer — "Inbox Briefing"

@@ -24,6 +24,24 @@ module NexoMail
 
       def self.prompt_key = "publisher"
 
+      # The one artifact this agent exists to produce. The workflow collects every
+      # declared name onto the run record after the agent finishes, so the
+      # deliverable outlives the workspace it was written into (nexo_ai >= 0.9).
+      produces "dashboard.html"
+
+      # Fail fast when the sandbox has no usable Ruby at all, instead of letting the
+      # model burn a turn on a shell command that dies with "ruby: command not
+      # found". Checked once, before the first turn, against the agent's OWN sandbox
+      # — so what gets verified is the environment the render command will actually
+      # run in, not the one your terminal has.
+      #
+      # Providing the interpreter is the operator's job, not this app's: the sandbox
+      # shell runs with a narrowed PATH (PATH/HOME/LANG only), so make sure a Ruby is
+      # reachable there — and pin `[dashboard] ruby` to an absolute path when yours is
+      # version-managed (mise/asdf/rbenv). This declaration only says out loud what
+      # the Publisher cannot work without.
+      requires commands: {"ruby" => ">= 3.0"}
+
       instructions <<~TXT
         You render the dashboard by running the render command the prompt gives you
         with the shell tool — you do NOT hand-write HTML. The command runs the

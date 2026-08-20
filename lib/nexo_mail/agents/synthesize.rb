@@ -19,6 +19,12 @@ module NexoMail
 
       def self.prompt_key = "synthesize"
 
+      # digest.json is the canonical artifact of the whole pipeline — everything
+      # downstream (dashboard, snapshot, terminal digest) is a view of it. Declaring
+      # both here means the workflow records them on the run itself, so they survive
+      # the workspace (nexo_ai >= 0.9).
+      produces "digest.json", "inbox-digest.md"
+
       # The digest is where money arithmetic happens, and where it was measurably
       # wrong: by_currency reported USD 289.00 against its own list summing to 269.00
       # (and the true extracted figure was 1218.00). SumPayments does the addition and

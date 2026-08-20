@@ -96,6 +96,68 @@ all archived to a timestamped snapshot.
 Each stage is one agent (stage 1 fans out to three). The workflow runs them in
 order, forwarding every tool call/result into the run's event log.
 
+### What a run leaves behind
+
+Files in the workspace are not the deliverable — they are where the deliverable
+happens to land. Each agent **declares** its output, and the workflow copies those
+bytes onto the run record itself:
+
+```ruby
+class Synthesize < SourceAgent
+  produces "digest.json", "inbox-digest.md"
+end
+
+class Publisher < SourceAgent
+  produces "dashboard.html"
+end
+```
+
+After every stage — including the paths where the stage *failed*, because an agent
+that died after writing its file still produced it — the workflow calls
+`collect_artifacts(agent)`, which resolves each declared name through the run's
+sandbox and stores it. `run.artifacts` then carries the deliverables independently of
+the directory they were written to, which is what makes the pipeline portable to an
+ephemeral sandbox and what a caller embedding this workflow as a library gets back
+without having to know where on disk we wrote anything.
+
+Declared, never swept: a sweep of the workspace would also collect the staged render
+script, the template and every scratch file, and an agent naming its outputs is the
+only honest way to say *"this run produced nothing."*
+
+The source agents are the one case that cannot use `produces` — a single
+`EmailSource` **class** serves every tool-based inbox, and the filename comes from the
+per-instance descriptor — so the workflow records those by path instead
+(`artifact(file, path: file)`, the same verbatim, no-ERB copy `produces` uses
+underneath). Neither is ever fatal: an artifact that could not be recorded emits
+`artifact_skipped` and the run continues.
+
+### What a stage needs, and saying so before it starts
+
+The Publisher cannot work without a Ruby interpreter, so it says so:
+
+```ruby
+requires commands: {"ruby" => ">= 3.0"}
+```
+
+Nexo probes the agent's **own sandbox** once, before the first turn, and raises
+`Nexo::EnvironmentError` naming every unmet requirement at once. That matters here
+because the sandbox shell runs with a narrowed `PATH` (`PATH`/`HOME`/`LANG` only), so
+the environment the render command runs in is not the one your terminal has.
+Provisioning it is the operator's job — pin `[dashboard] ruby` to an absolute
+interpreter when yours is version-managed — and this declaration just turns a
+mid-run `ruby: command not found` into a preflight failure with a legible sentence.
+`nexo-triage --check` runs the same probe and prints what the sandbox actually has.
+
+The skill states the same need in prose, through the Agent Skills spec's own field:
+
+```yaml
+compatibility: Needs a Ruby 3.0+ interpreter reachable from the sandbox shell…
+```
+
+Two audiences, two mechanisms: `requires` is checked and fails the run; the skill's
+`compatibility:` is appended to the model's instructions so it knows what it is
+working with and can say so plainly instead of improvising HTML.
+
 ## The integration patterns
 
 Each service exposes itself differently, so each is reached differently — but all
