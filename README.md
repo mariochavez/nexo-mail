@@ -67,6 +67,7 @@ indexing, the Gmail App Password steps, building the `hey` CLI).
 ```sh
 nexo-triage                 # triage all configured sources → digest
 nexo-triage --check         # preflight: which model + services are ready
+nexo-triage --resume        # continue a paused run without re-reading the inboxes
 nexo-triage --model cloud   # pick a configured model by alias
 nexo-triage --theme latte   # override the theme for this run
 RUBYLLM_WIRE=1 nexo-triage   # show the raw ruby_llm/MCP logs
@@ -81,6 +82,11 @@ Each agent **declares** what it produces, so the run itself carries the delivera
 (`digest.json`, `inbox-digest.md`, `dashboard.html`, the per-source extractions) —
 not just the directory they happened to land in. The last line of a run tells you
 what was recorded.
+
+A run that reads every inbox and then fails to build the digest **pauses** rather
+than dying: the extraction is checkpointed, so `--resume` picks up at synthesis
+instead of re-reading three inboxes. Runs persist as one JSON document each under
+`$XDG_STATE_HOME/nexo-mail/runs`.
 
 `--check` also probes the **sandbox**, not only your services: the render stage needs
 a Ruby interpreter reachable from the sandbox shell, which runs with a narrowed

@@ -139,6 +139,19 @@ parses no JSON, renders nothing.
   (`CLI#print_sandbox_check`) so the gap shows up before a run. `drive_agent` rescues
   `Nexo::EnvironmentError` separately and tags the event `unmet: true` — the fix is
   provisioning, not a retry.
+- **Runs persist to disk, and that is the ONLY reason `--resume` exists.**
+  `CLI#configure_model!` sets `Nexo.config.run_store = Nexo::RunStore::Disk.new(dir:
+  Config.runs_dir)` (nexo_ai >= 0.10). Nexo's default store is in-memory and dies
+  with the process, so checkpoints/suspend/artifacts would all be unreadable next
+  invocation. The workflow wraps stage 1 in `checkpoint(:extract) { fan_out_sources
+  }` and calls `suspend!` when synthesis wrote no `digest.json` — "suspended" is a
+  NON-failure, and `--resume` re-enters `#call` from the top where the checkpoint
+  short-circuits the three inboxes. `suspend!` must be OUTSIDE the checkpoint.
+  The checkpoint stores the `{source => filename}` map, not the mail — the files
+  live in the workspace. `Workflow.resume` only accepts a `"suspended"` run, so a
+  `"failed"` one is NOT resumable; that is why the workflow suspends deliberately
+  instead of letting the stage swallow the error. Nexo never prunes run documents
+  (`CLI#trim_runs` keeps `Config.runs_keep`).
 - **The Publisher's sandbox is CONFIG-DRIVEN and Nexo owns it.**
   `Agents::Publisher.sandbox` is a lazy READER override returning `:local` or a
   container options Hash from `[dashboard] sandbox` / `image` (local|docker|apple,
@@ -346,5 +359,5 @@ parses no JSON, renders nothing.
 
 ## Dependencies
 
-`nexo_ai ~>0.9`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
+`nexo_ai ~>0.10`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
 `toml-rb`, `async ~>2.0`, `lipgloss`, `glamour`. Requires Ruby **3.3+**.
