@@ -51,6 +51,13 @@ flavor = "mocha"
 # into a timestamped snapshot. `nexo-triage --prune-snapshots` trims the history.
 # snapshots_keep = 20
 
+# Runs themselves are persisted too, one JSON document each — status, event log,
+# checkpoints and recorded artifacts. That is what makes `nexo-triage --resume`
+# possible: a run that read every inbox and then failed to build the digest pauses
+# instead of dying, and resuming skips straight back to synthesis. Keep the newest N.
+# runs_dir  = "${XDG_STATE_HOME:-~/.local/state}/nexo-mail/runs"
+# runs_keep = 20
+
 # ── Dashboard ───────────────────────────────────────────────────────────────
 # The Publisher renders dashboard.html from a template + a render script. Both are
 # AUTO-RESOLVED from the skill the Publisher declares — ruby_llm-skills finds that

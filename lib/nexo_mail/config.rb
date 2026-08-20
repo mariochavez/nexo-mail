@@ -29,7 +29,18 @@ module NexoMail
     # into a timestamped subdirectory here; `nexo-triage --prune-snapshots` trims them.
     def snapshots_dir = path("NEXO_MAIL_SNAPSHOTS_DIR", data["snapshots_dir"], File.join(state_home, APP, "snapshots"))
 
+    # Where Nexo persists this CLI's workflow runs. State, like snapshots: a run
+    # document holds the run's status, event log, checkpoints and recorded
+    # artifacts, and it is what `--resume` reads back after the process is gone.
+    def runs_dir = path("NEXO_MAIL_RUNS_DIR", data["runs_dir"], File.join(state_home, APP, "runs"))
+
     # How many run snapshots to keep when pruning (newest wins). Default 20.
+    # How many run documents to keep in runs_dir. Nexo never prunes them — retention
+    # is the host's policy — and each holds this run's artifacts, so they add up.
+    def runs_keep
+      val("NEXO_MAIL_RUNS_KEEP", data["runs_keep"], "20").to_i.clamp(1, 500)
+    end
+
     def snapshots_keep
       val("NEXO_MAIL_SNAPSHOTS_KEEP", data["snapshots_keep"], "20").to_i
     end

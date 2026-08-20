@@ -32,7 +32,7 @@ module NexoMail
       return prune_snapshots(opts[:prune]) if opts.key?(:prune)
 
       configure_model!(@cli_model)
-      triage
+      opts[:resume] ? resume(opts[:resume]) : triage
     rescue NexoMail::Error => e
       warn bad.render("✗ #{e.message}")
       exit 1
@@ -75,6 +75,11 @@ module NexoMail
       Nexo.configure do |c|
         c.skills_path = Config.skills_dir
         c.tool_concurrency = Config.tool_concurrency
+        # Durability for a CLI. Everything that outlives the process — the run's
+        # checkpoints, its suspended state, its recorded artifacts — is read back
+        # from the run store, and Nexo's default one is in-memory. One line makes
+        # `--resume` possible at all.
+        c.run_store = Nexo::RunStore::Disk.new(dir: Config.runs_dir)
       end
       Nexo.config.default_model = model.model
       Agents::SourceAgent.configure_model!(model)
@@ -87,6 +92,7 @@ module NexoMail
         o.on("-m", "--model ALIAS", "Use the configured model with this alias (default: first)") { |v| opts[:model] = v }
         o.on("--theme FLAVOR", Theme.flavors, "Catppuccin flavor: #{Theme.flavors.join(", ")}") { |v| opts[:theme] = v }
         o.on("--check", "Preflight only: which model + services are ready") { opts[:check] = true }
+        o.on("--resume [RUN_ID]", "Resume a suspended run (default: the most recent one)") { |v| opts[:resume] = v || :last }
         o.on("--prune-snapshots [KEEP]", Integer, "Delete old run snapshots, keeping the newest KEEP (default #{Config.snapshots_keep})") { |v| opts[:prune] = v }
         o.on("-h", "--help", "Show help and how to configure everything") { print_help }
       end.parse!(argv)
@@ -98,7 +104,25 @@ module NexoMail
 
     # ---- The run ------------------------------------------------------------
 
-    def triage
+    def triage = drive("Triaging inboxes") { Workflows::MultiInboxTriage.run }
+
+    # Continue a run the workflow paused (it read every inbox, then failed to build
+    # the digest). Re-entering #call skips the extraction checkpoint, so this costs
+    # a synthesis, not three inboxes. Only possible because runs persist to disk —
+    # see the run_store line in #configure_model!.
+    def resume(which)
+      run = (which == :last) ? runs.all.find(&:suspended?) : runs.find(which.to_s)
+      unless run&.suspended?
+        warn bad.render(run ? "✗ Run #{run.id} is #{run.status}, not suspended." : "✗ No suspended run to resume.")
+        exit 1
+      end
+
+      puts "  #{dim.render("resuming #{run.id} — #{run.suspend_reason}")}"
+      drive("Resuming") { Workflows::MultiInboxTriage.resume(run.id) }
+    end
+
+    # The banner, the spinner and the report, shared by a fresh run and a resume.
+    def drive(label)
       puts
       puts header.render("Nexo Mail Agent — Apple Mail · Gmail · HEY")
       puts "  #{dim.render("model: #{@active_model.alias} · #{@active_model.model} (#{@active_model.provider})")}"
@@ -108,12 +132,12 @@ module NexoMail
       result = nil
       error = nil
       worker = Thread.new do
-        result = Workflows::MultiInboxTriage.run
+        result = yield
       rescue => e
         error = e
       end
 
-      spin(worker, started)
+      spin(worker, started, label)
       worker.join
       print "\r\e[K" # clear the spinner line
 
@@ -124,14 +148,26 @@ module NexoMail
 
       total = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       report(result, total)
+      trim_runs
     end
 
-    def spin(worker, started)
+    # The configured run store — Nexo::RunStore::Disk, set in #configure_model!.
+    def runs = Nexo::RunStore.default
+
+    # Nexo never prunes run documents: retention is the host's policy, and each one
+    # carries this run's artifacts. Keep the newest N, delete the rest. Best-effort.
+    def trim_runs
+      runs.all.drop(Config.runs_keep).each { |run| File.delete(run.path) if run.path }
+    rescue
+      nil
+    end
+
+    def spin(worker, started, label)
       frame = 0
       while worker.alive?
         elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
         print "\r#{brand.render(SPINNER[frame % SPINNER.size])} " \
-              "Triaging inboxes…  #{dim.render("elapsed #{clock(elapsed)}")}   "
+              "#{label}…  #{dim.render("elapsed #{clock(elapsed)}")}   "
         $stdout.flush
         frame += 1
         sleep 0.1
@@ -154,6 +190,7 @@ module NexoMail
         puts bad.render("No digest produced (run status: #{run.status}).")
       end
       print_artifacts(run)
+      print_resume_hint(run)
     end
 
     # Point the user at the two deliverables (dashboard + JSON) and this run's
@@ -183,6 +220,17 @@ module NexoMail
     end
 
     def size(bytes) = (bytes < 1024) ? "#{bytes}B" : "#{(bytes / 1024.0).round}KB"
+
+    # A suspended run is a NON-failure: the inboxes were read and are checkpointed,
+    # only the digest is missing. Say how to pick it up rather than leaving the user
+    # to rerun everything.
+    def print_resume_hint(run)
+      return unless run.respond_to?(:suspended?) && run.suspended?
+
+      puts
+      puts "  #{bad.render("paused")}     #{run.suspend_reason}"
+      puts "  #{dim.render("the inboxes are already read — resume with →")} #{dim.render("nexo-triage --resume")}"
+    end
 
     def artifact_path(name) = File.join(Config.sandbox_dir, name)
     def read_artifact(name) = ((p = artifact_path(name)) && File.exist?(p)) ? File.read(p) : nil
@@ -330,6 +378,7 @@ module NexoMail
       line "-m, --model ALIAS        Use a configured model by alias (default: the first)"
       line "    --theme FLAVOR        #{Theme.flavors.join(" | ")} (default from config)"
       line "    --check               Preflight: which model + services are ready"
+      line "    --resume [RUN_ID]     Continue a paused run (default: the most recent) without re-reading the inboxes"
       line "    --prune-snapshots [N] Prune run snapshots, keeping the newest N (default #{Config.snapshots_keep})"
       line "-h, --help                This help"
 
@@ -364,6 +413,7 @@ module NexoMail
       line "dashboard.html  a self-contained briefing (built by the publisher agent)"
       line "inbox-digest.md the terminal digest · in #{Config.sandbox_dir}"
       line "snapshots       each run archived under #{Config.snapshots_dir}"
+      line "runs            run history under #{Config.runs_dir} (newest #{Config.runs_keep} kept; what --resume reads)"
 
       section "MORE"
       note "Skills:  #{Config.skills_dir}"

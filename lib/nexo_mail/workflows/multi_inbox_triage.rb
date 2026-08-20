@@ -31,10 +31,21 @@ module NexoMail
         available, skipped = partition_sources
         skipped.each { |name, reason| emit(:source_skipped, source: name, reason: reason) }
 
-        produced = fan_out_sources(available)
+        # The expensive half: three inboxes, minutes of model time. Behind a
+        # checkpoint it is paid for ONCE per run — a `--resume` after a failed
+        # synthesis re-enters #call from the top and gets this back from the run's
+        # state instead of reading every inbox again. (Durable only because the CLI
+        # points Nexo at a Disk run store; on the in-memory default the run, and this,
+        # die with the process.)
+        produced = checkpoint(:extract) { fan_out_sources(available) }
         return {sources: [], skipped: skipped, files: []} if produced.empty?
 
         drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
+        # A run that read every inbox and then failed to build the digest is worth
+        # pausing rather than burying: "suspended" is a non-failure the CLI can offer
+        # to resume, and resuming skips straight back to synthesis. Outside the
+        # checkpoint, which is where suspend! belongs.
+        suspend!(reason: "synthesis produced no #{DIGEST}") unless File.exist?(File.join(Config.sandbox_dir, DIGEST))
         drive_agent(Agents::Publisher, "publisher") { |agent| publisher_prompt(agent) }
         drive_agent(Agents::Archivist, "archivist", archivist_prompt)
 

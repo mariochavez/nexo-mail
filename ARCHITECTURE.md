@@ -198,6 +198,40 @@ copy is used and `publisher_override_ignored` is emitted.
 preflight tells you `docker · ruby:3.3-slim → ✓ ruby 3.3.12` — or that your image
 ships no Ruby at all.
 
+### A run that pauses instead of dying
+
+The expensive half of a triage is stage 1: three inboxes, minutes of model time. If
+synthesis then fails — a flaky model, malformed output — throwing that away and
+starting over is the wrong shape. So it isn't thrown away:
+
+```ruby
+produced = checkpoint(:extract) { fan_out_sources(available) }
+drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
+suspend!(reason: "synthesis produced no digest.json") unless File.exist?(...)
+```
+
+`suspend!` leaves the run `"suspended"` — a **non-failure**, distinct from
+`"failed"` — and returns it. `nexo-triage --resume` re-enters `#call` from the top,
+where the checkpoint hands back the stored extraction instead of re-running it, and
+the run continues into synthesis. The CLI says so at the end of a paused run rather
+than leaving you to guess.
+
+None of that works on Nexo's default run store, which is in-memory and dies with the
+process. One line in the CLI is what makes it durable:
+
+```ruby
+c.run_store = Nexo::RunStore::Disk.new(dir: Config.runs_dir)
+```
+
+A JSON document per run under `$XDG_STATE_HOME/nexo-mail/runs` — status, event log,
+checkpoints, recorded artifacts. Nexo never prunes them (retention is the host's
+policy, and each carries that run's artifacts), so the CLI keeps the newest
+`runs_keep` and deletes the rest.
+
+Note what the checkpoint actually stores: the `{source => filename}` map, not the
+mail. The extraction files themselves live in the workspace, which is why this pairs
+with the artifact recording above rather than replacing it.
+
 ## The integration patterns
 
 Each service exposes itself differently, so each is reached differently — but all
