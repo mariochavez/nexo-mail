@@ -15,7 +15,12 @@ Gem::Specification.new do |spec|
   spec.homepage = "https://github.com/mariochavez/nexo_mail"
   spec.required_ruby_version = ">= 3.3"
 
-  spec.files = Dir["lib/**/*.rb", "data/**/*", "*.md", "LICENSE*"]
+  # The `*.md` glob picks up AGENTS.md, which is a symlink to .claude/CLAUDE.md —
+  # repo furniture for coding agents, whose target is deliberately not packaged. A
+  # symlink whose target is absent ships as a dangling link (and `gem build` says so
+  # on every build), so drop symlinks outright rather than naming this one: any
+  # future link into an unpackaged path is the same bug.
+  spec.files = Dir["lib/**/*.rb", "data/**/*", "*.md", "LICENSE*"].reject { |f| File.symlink?(f) }
   spec.bindir = "exe"
   spec.executables = ["nexo-triage"]
   spec.require_paths = ["lib"]
