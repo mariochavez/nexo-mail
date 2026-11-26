@@ -122,7 +122,7 @@ module NexoMail
         text = block_given? ? yield(agent) : prompt
         return if text.nil?
 
-        agent.prompt(text, max_turns: 12) { |type, payload| forward_event(tag, type, payload) }
+        agent.prompt(text, max_turns: 20) { |type, payload| forward_event(tag, type, payload) }
         emit(:"#{tag}_done", ms: ms_since(started))
       rescue Nexo::EnvironmentError => e
         # The agent declared what its sandbox must provide (`requires`) and the

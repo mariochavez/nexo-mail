@@ -210,7 +210,7 @@ parses no JSON, renders nothing.
   `ruby -Ilib -e '…; p Agents::SourceAgent.new(cwd: Dir.pwd).chat.tools.keys'`
   → no `shell`; the same for `Agents::Publisher` → `shell` present.
 - **Skill-bundled files are AUTO-RESOLVED, never path-joined.** `scripts/`,
-  `assets/`, `references/` is *ruby_llm-skills'* convention, and `Nexo::Skills.find`
+  `assets/`, `references/` is the Agent Skills convention, and `Nexo::Skills.find`
   already returns a `Skill` exposing `#scripts`/`#assets`. `Config.skill_script` /
   `#skill_asset` wrap that; `dashboard_renderer`/`dashboard_template` take the SKILL
   as an argument and the workflow passes `Agents::Publisher.skills.first`. Nothing
@@ -265,13 +265,15 @@ parses no JSON, renders nothing.
 - **Concurrency here is fibers, not threads.** `Config.tool_concurrency` defaults to
   **`:fibers`**, so ruby_llm overlaps multiple tool calls from one turn on async —
   the same reactor `Nexo.concurrent` already runs the source agents in.
-  `Tools::Pool` (the in-tool fan-out) is a thin wrapper over the SAME machinery —
-  `RubyLLM::ToolConcurrency.run` — so one setting governs both axes and Pool owns no
-  reactor plumbing. Two things it must add, and the reasons they are not optional:
-  ToolConcurrency has NO in-flight bound (one task per entry), so `Pool` slices into
-  chunks of `size` — Gmail caps simultaneous IMAP connections per account and `hey`
-  serializes on the keyring; and ToolConcurrency RE-RAISES the first error and
-  abandons the rest, so the per-item `guard` (→ `{error:}`) is what keeps one dead
+  `Tools::Pool` (the in-tool fan-out) honors the SAME setting: `:fibers` goes through
+  `Nexo.concurrent(max_in_flight: size)`, `:threads` runs slices of plain threads, and
+  anything else runs in line. (Until nexo_ai 0.13 it called `RubyLLM::ToolConcurrency`
+  directly; ruby_llm 2.x moved that to a private `RubyLLM::Chat::ToolConcurrency`, so
+  Pool no longer touches ruby_llm internals.) Two properties it must keep, and the
+  reasons they are not optional: an in-flight bound of `size` — Gmail caps simultaneous
+  IMAP connections per account and `hey` serializes on the keyring; and a per-item
+  `guard` (→ `{error:}`), because `Nexo.concurrent` RE-RAISES the first error and stops
+  the rest, and the guard is what keeps one dead
   thread id from sinking a batch of fifteen. Measured: peak-in-flight tracks `size`
   exactly (4→4, 8→8), order preserved, and it nests correctly inside the reactor the
   workflow already runs. This works because Async's scheduler hooks `process_wait`,
@@ -283,8 +285,8 @@ parses no JSON, renders nothing.
   `uids: []`, `HeyThread` takes `thread_ids: []` — one model round trip instead of
   N, and for Gmail one IMAP session instead of N. Both listings carry a `snippet`
   so most messages never need a body read at all. Every tool returns
-  `JSON.generate(...)`: ruby_llm `to_s`-es a non-Content result (`chat.rb:383`), so
-  a Hash would reach the model as Ruby `inspect`, not JSON.
+  `JSON.generate(...)`. (ruby_llm 2.x now serializes a Hash result as JSON itself; under
+  1.16 it reached the model as Ruby `inspect`. The explicit JSON keeps the shape ours.)
 - **The run window is the AGENT's, not Ruby's.** Ruby holds no date policy at all:
   `Tools::Today` is a clock (today, month bounds, previous_month — no judgments),
   and the `email_triage` / `inbox_synthesis` skills define the window as *the 15th
@@ -312,9 +314,12 @@ parses no JSON, renders nothing.
   in the dashboard, and in `inbox-digest.md`.
 - **Read shaping is config, and it is the only real bound.** The `[read]` block /
   `NEXO_MAIL_*` vars (see `Config.read_int`) cap list size, snippet length, batch
-  size and body length. The workflow's `max_turns:` is INERT — `Nexo::Loops::RubyLLM`
-  accepts and ignores it — so these caps plus the skill's two-read budget are all
-  that stands between you and a runaway read loop.
+  size and body length. As of nexo_ai 0.13 the workflow's `max_turns:` is ALSO a real
+  bound: it caps tool ROUNDS (model responses that ask for tools) and raises
+  `RubyLLM::ToolRoundLimitError` when spent, which fails the run. Under 0.12 it was
+  inert. So a stage that legitimately needs more rounds must have its number raised —
+  a second run on a sandbox that still holds the last run's files costs extra rounds,
+  because the read-before-write guard makes the model re-read each file it overwrites.
 - **Snapshots live in `Config.snapshots_dir`** (state), separate from the sandbox.
   Because the sandbox is fenced, agents reach snapshots ONLY via the `ArchiveRun` /
   `PruneSnapshots` tools. Each run archives `digest.json` + `dashboard.html` +
@@ -366,5 +371,7 @@ parses no JSON, renders nothing.
 
 ## Dependencies
 
-`nexo_ai ~>0.11`, `ruby_llm-mcp`, `ruby_llm-skills`, `zeitwerk`, `net-imap`,
-`toml-rb`, `async ~>2.0`, `lipgloss`, `glamour`. Requires Ruby **3.3+**.
+`nexo_ai ~>0.13` (which brings `ruby_llm ~>2.2`, MCP included), `zeitwerk`,
+`net-imap`, `toml-rb`, `bigdecimal`, `async ~>2.0`, `lipgloss`, `glamour`. Requires
+Ruby **3.3+**. Do NOT add `ruby_llm-mcp` or `ruby_llm-skills`: the first defines the
+same `RubyLLM::MCP` constant as ruby_llm 2.x and both pin ruby_llm 1.x.
