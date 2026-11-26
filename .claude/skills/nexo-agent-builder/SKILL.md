@@ -6,8 +6,8 @@ description: Build AI agents, tools, and workflows using Nexo (the nexo_ai gem, 
 # Nexo Agent Builder
 
 Nexo is a Ruby agent harness: `Agent = Model + Harness`. It composes the
-`ruby_llm` ecosystem (`ruby_llm`, `ruby_llm-skills`, `ruby_llm-mcp`,
-`ruby_llm-schema`) into one front door with two genuinely new pieces — a
+`ruby_llm` 2.x stack (the tool loop, its built-in MCP client, and Schematist
+for structured output) into one front door with two genuinely new pieces — a
 **Sandbox + Permissions** seam and a **WorkflowRun** durability primitive.
 Everything else is composed, not reimplemented.
 
@@ -78,7 +78,7 @@ run.result   # => { "summary" => "..." }
 # 3. A custom Tool — a plain RubyLLM::Tool, attached by overriding #chat
 class LookupOrder < RubyLLM::Tool
   description "Look up an order by id"
-  param :order_id, type: :string, required: true
+  parameter :order_id, type: :string, required: true
   def execute(order_id:)
     order = Order.find_by(id: order_id)
     order ? order.attributes : { error: "order #{order_id} not found" }
@@ -119,10 +119,10 @@ end
 ```
 
 ```ruby
-# 6. Structured output — ruby_llm-schema directly against agent.chat.
-# No Nexo macro exists (or is needed) — ruby_llm >= 1.16 hard-depends on
-# ruby_llm-schema, so it's always present, never a MissingDependencyError risk.
-class PersonSchema < RubyLLM::Schema
+# 6. Structured output — Schematist directly against agent.chat.
+# No Nexo macro exists (or is needed) — ruby_llm 2.x depends on schematist, so
+# it's always present. Read the Hash with `.parsed` (`.content` is the JSON text).
+class PersonSchema < Schematist::Schema
   string  :name, description: "Person's full name"
   integer :age
 end
@@ -178,7 +178,7 @@ the layout and persistence the rest of this skill assumes:
 |---|---|---|
 | `rails g nexo:install` | `app/agents/`, `app/workflows/`, `app/skills/` (+ `.keep`), `config/initializers/nexo.rb` | Once, the first time Nexo is added to the app |
 | `rails g nexo:workflows` | Migration for `nexo_workflow_runs` — id, status, payload, result, events, **and already includes `artifacts` + `state`** | Before using `Nexo::Workflow` with persisted (ActiveRecord) runs instead of the in-memory store |
-| `rails g nexo:skill NAME` | `app/skills/NAME/SKILL.md` + `references/` | Scaffolding a new `ruby_llm-skills` package to attach via `skills :name` |
+| `rails g nexo:skill NAME` | `app/skills/NAME/SKILL.md` + `references/` | Scaffolding a new `SKILL.md` package to attach via `skills :name` |
 
 Run `rails db:migrate` after `nexo:workflows`.
 
@@ -189,9 +189,9 @@ Run `rails db:migrate` after `nexo:workflows`.
 | A model that reads/writes files, runs shell, calls tools in one turn-based conversation | `Nexo::Agent` | a bare `RubyLLM::Chat` — you lose the sandbox/permissions seam |
 | A background job with a persisted status/result you can poll or resume | `Nexo::Workflow` | a plain `ActiveJob` — you lose the run record, event log, checkpoint/resume |
 | One extra domain-specific capability (DB lookup, internal API call) | A plain `RubyLLM::Tool`, attached via `Agent#chat` override | a new Nexo primitive — Nexo has no `tools` macro; this is intentional composition |
-| Reusable domain guidance/playbooks the model should consult conditionally | A `ruby_llm-skills` `SKILL.md` package (`app/skills/`), declared via `skills :name` | baking it into `instructions` — that costs tokens on *every* prompt |
+| Reusable domain guidance/playbooks the model should consult conditionally | A `SKILL.md` package (`app/skills/`), declared via `skills :name` | baking it into `instructions` — that costs tokens on *every* prompt |
 | Calling an external service that already speaks MCP | `mcp` macro | a hand-rolled HTTP client tool |
-| Getting back parsed JSON/a Hash instead of free text | `agent.chat.with_schema(MySchema).ask(...)` (`ruby_llm-schema`, always present — hard dep of `ruby_llm` itself) | inventing a Nexo `schema` macro — there is none, and none is needed |
+| Getting back parsed JSON/a Hash instead of free text | `agent.chat.with_schema(MySchema).ask(...)` (Schematist, always present — a dependency of `ruby_llm` 2.x; read the Hash with `.parsed`) | inventing a Nexo `schema` macro — there is none, and none is needed |
 | A step that needs to pause for human approval or an external event, then continue | `Workflow#checkpoint` + `#suspend!` + `::resume` | a loop that polls, or a tool that blocks |
 | Several independent expensive steps in one workflow | `Workflow#checkpoint_all` | hand-rolled threads/futures |
 | Running an agent from a background job | `Workflow.run_later` (needs ActiveJob) + `agent` macro on the workflow + `#run_agent` | calling `Agent#prompt` directly inside a raw `ActiveJob` — you lose the run record |
@@ -200,8 +200,8 @@ Run `rails db:migrate` after `nexo:workflows`.
 
 ### 1. Compose, don't reimplement
 If you're about to hand-write a tool-call loop, a skill loader, an MCP
-client, or a JSON-schema-to-tool converter — stop. That's `ruby_llm` core,
-`ruby_llm-skills`, `ruby_llm-mcp`, or `ruby_llm-schema`'s job. Nexo only adds
+client, or a JSON-schema-to-tool converter — stop. That's `ruby_llm`'s job
+(MCP ships with it since 2.1; Nexo reads `SKILL.md` itself). Nexo only adds
 the Sandbox/Permissions seam, the WorkflowRun lifecycle, and DSL glue.
 
 ### 2. Provider-neutral, always
@@ -212,8 +212,8 @@ model ENV.fetch("NEXO_MODEL")
 # ❌ BAD — hardcodes a vendor
 model "claude-sonnet-4-5"
 ```
-No `Nexo.config.default_model` ships with a value. Anthropic-specific paths
-(`Loops::AgentSDK`) are opt-in only, never the default `loop:`.
+No `Nexo.config.default_model` ships with a value. `Loops::RubyLLM` is the only
+loop Nexo ships (`Loops::AgentSDK` was removed in 0.13).
 
 **The `assume_model_exists` catch.** `ruby_llm` validates every model id
 against its bundled `models.json` registry and infers the provider from it.
@@ -301,12 +301,12 @@ bundle show ruby_llm  # then read the actual source
 | Setting `assume_model_exists true` on a normal, already-registered hosted model | Silently skips a real validation (e.g. would have caught a typo'd model id) for no benefit | Only set it for local Ollama tags, self-hosted builds, or models newer than the installed registry |
 | Adding a `tools` macro to an `Agent` subclass | Nexo has no such macro — the four sandbox tools are wired internally | Override `#chat` and call `super.with_tools(YourTool.new)` |
 | Rescuing `Nexo::ApprovalRequired` inside your own tool code | It's a control-flow signal meant to propagate, not a tool failure | Let it propagate; `Workflow#run_agent` already rescues it into a durable suspend |
-| Looking for a `schema` macro on `Nexo::Agent`, or guarding structured output behind a dependency check | No macro exists (or is needed); `ruby_llm-schema` is a hard dependency of `ruby_llm` itself, not a soft one like `ruby_llm-skills`/`ruby_llm-mcp` | Call `agent.chat.with_schema(MySchema).ask(...)` directly — never `MissingDependencyError` risk |
+| Looking for a `schema` macro on `Nexo::Agent`, or guarding structured output behind a dependency check | No macro exists (or is needed); Schematist is a dependency of `ruby_llm` 2.x itself | Call `agent.chat.with_schema(MySchema).ask(...)` directly — never `MissingDependencyError` risk |
 | Calling `Agent#prompt` inside a bare `ActiveJob` for background work | You lose the run record, status, event log | Use `Nexo::Workflow` + `run_agent` + `run_later` |
 | A workflow with no `sandbox`/`agent` declared calling `#stage`/`#artifact`/`run_agent` | These need a resolved sandbox — raises `ConfigurationError` | Declare `sandbox :local` (or `:docker`) and, for `run_agent`, an `agent MyAgent` line |
 | Calling `#suspend!` inside a `checkpoint` block | Undefined behavior — v1 unsupported | Call `#suspend!` outside any checkpoint |
 | Naming a checkpoint `__suspend__`, `__approval__`, or `__buffer_events__` | Reserved state keys | Pick a domain name |
-| Assuming `skills :name` widens what an agent can do | A skill contributes **instructions only** — Nexo deliberately doesn't attach `ruby_llm-skills`' own progressive-disclosure tool (ungated `File.read`) | The model reaches a skill's `references/`/`scripts/` only through the agent's own sandbox-gated tools — attaching a skill never changes the effective sandbox/permission mode |
+| Assuming `skills :name` widens what an agent can do | A skill contributes **instructions only** — Nexo deliberately doesn't attach `ruby_llm`'s `load_skill` tool (it reads skill files from the host, outside the sandbox) | The model reaches a skill's `references/`/`scripts/` only through the agent's own sandbox-gated tools — attaching a skill never changes the effective sandbox/permission mode |
 | Assuming `run_later`/`resume_later` retries automatically on crash | Nexo adds no `retry_on` by design (host's ActiveJob owns retries) | Configure `retry_on` on your own job, or call `reconcile_interrupted!` at boot |
 | A tool that raises instead of returning `{ error: }` | Kills the tool loop instead of letting the model adapt | Rescue and return `{ error: msg }` |
 | Escalating `permissions :auto` "just for this one example" | Silently defeats safe-by-default | Keep `:read_only` unless the task genuinely needs write/shell/fetch |
@@ -355,7 +355,7 @@ Docs to reach for by topic (paths relative to the repo/gem root):
 | Sandboxes (Virtual/Local/Remote/Container) | `docs/sandboxes.md` |
 | Permissions modes and the `:ask`/`:approve` gates | `docs/permissions.md` |
 | Built-in tools (ReadFile/WriteFile/Shell/Glob) | `docs/tools.md` |
-| Loop backends (RubyLLM vs AgentSDK) | `docs/loops.md` |
+| The loop, `max_turns` as a hard cap | `docs/loops.md` |
 | Workflow lifecycle, staging, artifacts | `docs/workflows.md` |
 | Checkpoint/suspend/resume durability | `docs/durable-workflows.md` |
 | SKILL.md packages for agents | `docs/skills.md` |

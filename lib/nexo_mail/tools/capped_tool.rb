@@ -15,7 +15,7 @@ module NexoMail
     # it can decide whether the missing tail mattered.
     #
     # Composes on top of Nexo::MCP::GatedTool, which is itself a duck-typed delegating
-    # wrapper: #name/#description/#params_schema fall through to the real tool, so the
+    # wrapper: #name/#description/#parameters_schema fall through to the real tool, so the
     # chat cannot tell any of the three apart. Authorization still happens in the
     # GatedTool underneath — this wrapper only ever sees an already-permitted call.
     class CappedTool
@@ -26,14 +26,15 @@ module NexoMail
         @max_chars = max_chars
       end
 
-      def call(args = {})
-        cap(@tool.call(args))
+      # ruby_llm 2.x calls every tool with keywords (`tool.call(**arguments)`).
+      def call(**arguments)
+        cap(@tool.call(**arguments))
       end
 
       # Mirror GatedTool: #execute must route through #call so no caller can reach the
       # unwrapped body by taking the other entry point.
       def execute(*args, **kwargs)
-        call(kwargs.empty? ? (args.first || {}) : kwargs)
+        call(**(args.first || {}).to_h, **kwargs)
       end
 
       def name = @tool.name
@@ -44,7 +45,7 @@ module NexoMail
         @tool.respond_to?(method_name, include_private) || super
       end
 
-      # Everything except the two entry points above (description, params_schema,
+      # Everything except the two entry points above (description, parameters_schema,
       # to_h, ...) goes straight to the wrapped tool so it serializes identically.
       def method_missing(method_name, *args, **kwargs, &block)
         if @tool.respond_to?(method_name)

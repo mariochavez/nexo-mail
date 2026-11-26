@@ -26,9 +26,10 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Agent harness + LLM stack.
-  spec.add_dependency "nexo_ai", "~> 0.11"
-  spec.add_dependency "ruby_llm-mcp"
-  spec.add_dependency "ruby_llm-skills"
+  # nexo_ai brings ruby_llm 2.2, which ships MCP itself. The community ruby_llm-mcp
+  # gem defines the same RubyLLM::MCP constant and must not be bundled alongside it;
+  # ruby_llm-skills is no longer needed (nexo_ai reads SKILL.md itself).
+  spec.add_dependency "nexo_ai", "~> 0.13"
   spec.add_dependency "zeitwerk"
 
   # Gmail over IMAP (net-imap is no longer default in Ruby 3.4+/4.0).
@@ -36,6 +37,10 @@ Gem::Specification.new do |spec|
 
   # Config parsing.
   spec.add_dependency "toml-rb"
+
+  # Exact money sums (Tools::SumPayments). A bundled gem since Ruby 3.4, so it must
+  # be declared; it used to arrive transitively through ruby_llm-mcp.
+  spec.add_dependency "bigdecimal"
 
   # Concurrent source fan-out.
   spec.add_dependency "async", "~> 2.0"

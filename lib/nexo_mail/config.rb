@@ -126,8 +126,8 @@ module NexoMail
 
     # --- Read shaping ---------------------------------------------------------
     # How much mail the source tools pull, and how much of each message they hand
-    # the model. These are the ONLY real bound on a runaway read loop: the
-    # workflow passes max_turns, but Nexo::Loops::RubyLLM accepts and ignores it.
+    # the model. They bound how much each call reads; the workflow's max_turns
+    # (a hard cap on tool rounds since nexo_ai 0.13) bounds how many calls there are.
     # Every value is clamped so a bad TOML entry cannot spawn 200 threads or
     # flood the context.
     def gmail_list_limit = read_int("NEXO_MAIL_GMAIL_LIST_LIMIT", "gmail_list_limit", 40, 1..200)

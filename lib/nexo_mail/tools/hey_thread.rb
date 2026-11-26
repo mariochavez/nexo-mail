@@ -30,7 +30,7 @@ module NexoMail
         ambiguous sender. Collect those ids first, then make one call.
       DESC
 
-      params do
+      parameters do
         array :thread_ids, description: "thread_id values from the box listing" do
           integer
         end

@@ -7,7 +7,7 @@ module NexoMail
     # timestamped subdirs), so an agent driving this can never reach anything else.
     class PruneSnapshots < RubyLLM::Tool
       description "Delete old run snapshots, keeping the newest `keep`. Returns how many were kept and which were removed. Bounded to the snapshots directory."
-      param :keep, type: :integer, required: false, desc: "How many of the newest snapshots to keep (default from config)"
+      parameter :keep, type: :integer, required: false, description: "How many of the newest snapshots to keep (default from config)"
 
       def execute(keep: nil)
         keep = Config.snapshots_keep if keep.nil?
