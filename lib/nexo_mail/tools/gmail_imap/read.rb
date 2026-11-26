@@ -27,7 +27,7 @@ module NexoMail
           sender. Collect those uids first, then make one call.
         DESC
 
-        params do
+        parameters do
           array :uids, description: "UIDs from the list tool" do
             integer
           end

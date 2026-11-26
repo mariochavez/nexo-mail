@@ -47,7 +47,7 @@ module NexoMail
         Neither is silently dropped — fix them and call again, or report them as-is.
       DESC
 
-      params do
+      parameters do
         array :payments, description: "The payments to add up" do
           object do
             number :amount, description: "The number only, e.g. 1234.50"

@@ -28,11 +28,11 @@ module NexoMail
           snippet cut off, and then batch every such uid into a single read call.
         DESC
 
-        param :only_unread, type: :boolean, required: false, desc: "Only unread messages (default true)"
-        param :limit, type: :integer, required: false, desc: "Max messages, newest first (default 40)"
-        param :since, type: :string, required: false, desc: "Only messages on/after this ISO date"
-        param :since_days, type: :integer, required: false, desc: "Only messages newer than N days (alternative to since)"
-        param :snippet_chars, type: :integer, required: false, desc: "Snippet length per message; 0 disables snippets (default 400)"
+        parameter :only_unread, type: :boolean, required: false, description: "Only unread messages (default true)"
+        parameter :limit, type: :integer, required: false, description: "Max messages, newest first (default 40)"
+        parameter :since, type: :string, required: false, description: "Only messages on/after this ISO date"
+        parameter :since_days, type: :integer, required: false, description: "Only messages newer than N days (alternative to since)"
+        parameter :snippet_chars, type: :integer, required: false, description: "Snippet length per message; 0 disables snippets (default 400)"
 
         def execute(only_unread: true, limit: nil, since: nil, since_days: nil, snippet_chars: nil)
           max = (limit || Config.gmail_list_limit).to_i.clamp(1, 200)

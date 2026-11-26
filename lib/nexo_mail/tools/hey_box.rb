@@ -45,7 +45,7 @@ module NexoMail
         `thread_id` has no readable body — classify it from the snippet alone.
       DESC
 
-      params do
+      parameters do
         array :boxes, description: 'Which boxes to list: any of "imbox", "feed", "papertrail", "setaside". Omit for all four.', required: false do
           string
         end

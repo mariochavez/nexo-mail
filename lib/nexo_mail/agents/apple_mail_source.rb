@@ -8,12 +8,22 @@ module NexoMail
     # Apple Mail is the one source whose reads we cannot batch: apple-mail-mcp is a
     # third-party server, and its `get_email` takes exactly one message_id and returns
     # the FULL body with no cap. The two levers we do have are both applied here —
-    # the reply size (see #apply_mcp) and the instructions (the email_triage skill
+    # the reply size (see #wrap_mcp_tool) and the instructions (the email_triage skill
     # tells the agent to lean on `search`, which returns content_snippet for many
     # messages at once, instead of calling `get_email` per message).
     class AppleMailSource < SourceAgent
       permissions Nexo::Permissions.new(mode: :read_only, allow: NexoMail::SANDBOX_WRITE, mcp_allow: NexoMail::MAIL_READ_TOOLS)
-      mcp :mail, transport: :stdio, command: Config.apple_mail_mcp_command
+      # ruby_llm's stdio transport leaves the server's stderr attached to ours, and
+      # apple-mail-mcp is chatty there (its banner, plus a validation warning each
+      # time ruby_llm probes it with a newer MCP revision before falling back). That
+      # would land in the middle of the TUI, so it is dropped unless RUBYLLM_WIRE asks
+      # to see the wire.
+      if ENV["RUBYLLM_WIRE"]
+        mcp :mail, transport: :stdio, command: Config.apple_mail_mcp_command
+      else
+        mcp :mail, transport: :stdio, command: "sh",
+          args: ["-c", 'exec "$0" 2>/dev/null', Config.apple_mail_mcp_command]
+      end
 
       def self.prompt_key = "apple_mail"
 
@@ -29,22 +39,12 @@ module NexoMail
       # Gmail's and HEY's tools bound themselves; this is the equivalent for a server
       # we do not own.
       #
-      # NOTE: #apply_mcp is a Nexo::Agent internal, not a published extension point —
-      # re-check it on any nexo_ai upgrade (verified against ~> 0.9). If it ever stops being
-      # called, the failure is loud: Apple Mail loses its tools entirely rather than
-      # silently losing the cap.
-      def apply_mcp(chat)
-        super
-        cap = Config.apple_body_chars
-        chat.tools.transform_values! do |tool|
-          mcp_tool?(tool) ? Tools::CappedTool.new(tool: tool, max_chars: cap) : tool
-        end
-        chat
+      # Nexo::Agent#wrap_mcp_tool is the published hook for this: it is handed each
+      # MCP tool AFTER the permission gate has wrapped it, so the cap only ever sees
+      # an already-permitted call.
+      def wrap_mcp_tool(tool)
+        Tools::CappedTool.new(tool: tool, max_chars: Config.apple_body_chars)
       end
-
-      # Only the gated MCP tools get capped — the sandbox read/write/glob tools are
-      # ours and already bounded.
-      def mcp_tool?(tool) = tool.is_a?(Nexo::MCP::GatedTool)
     end
   end
 end
