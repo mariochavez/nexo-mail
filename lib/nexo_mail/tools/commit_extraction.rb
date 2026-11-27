@@ -22,10 +22,19 @@ module NexoMail
         Pass `file` (the `*.new.json` you wrote — an empty array `[]` when nothing new
         arrived) and `keep_since` (the ISO date your run window starts): items received
         before it are left out of the extraction file, though they stay on record.
+        Pass `keep_by_lane` to give a lane its own cutoff instead — e.g. reading kept
+        30 days, conversations 90.
+
+        A sender the reader has fixed to a lane gets that lane whatever you wrote.
       DESC
 
-      parameter :file, type: :string, description: "The *.new.json file you wrote in the workspace"
-      parameter :keep_since, type: :string, required: false, description: "ISO date the run window starts; older items are left out"
+      parameters do
+        string :file, description: "The *.new.json file you wrote in the workspace"
+        string :keep_since, description: "ISO date the run window starts; older items are left out", required: false
+        object :keep_by_lane, description: "ISO date per lane, overriding keep_since for that lane", required: false do
+          SenderMemory::LANES.each { |lane| string lane.to_sym, required: false }
+        end
+      end
 
       # Remove a source's extraction file (and any half-written `*.new.json`) from the
       # workspace before its agent runs. The file is only a VIEW of the ledger, rebuilt
@@ -37,7 +46,7 @@ module NexoMail
         [target, Ledger.inbox_file(target)].each { |name| FileUtils.rm_f(File.join(Config.sandbox_dir, File.basename(name))) }
       end
 
-      def execute(file:, keep_since: nil)
+      def execute(file:, keep_since: nil, keep_by_lane: nil)
         target = target_for(file)
         return JSON.generate(error: "unknown file #{file.inspect} — expected one of: #{inboxes.keys.join(", ")}") unless target
 
@@ -48,7 +57,12 @@ module NexoMail
         return JSON.generate(error: "#{File.basename(file)} must hold a JSON array of items") unless items.is_a?(Array)
 
         ledger = Ledger.for_file(target)
-        kept = ledger.commit(items, keep_since: keep_since)
+        items.grep(Hash).each { |item| (lane = SenderMemory.fixed(item["sender_email"])) && item["lane"] = lane }
+        # Counted before the commit makes them known: only a first filing teaches
+        # the sender memory, not a thread that came back.
+        first_filed = items.grep(Hash).reject { |item| ledger.known?(item) }
+        kept = ledger.commit(items, keep_since: keep_since, keep_by_lane: keep_by_lane)
+        SenderMemory.learn(first_filed)
         # One item per line: the next stage reads this file through a line-windowed
         # read tool, and pretty-printing turned 204 items into 2,927 lines — six
         # round trips to read what fits in one.

@@ -65,6 +65,7 @@ module NexoMail
       @key = key
       @offered = {}
       @handed = []
+      @routed = []
       @committed = false
       load
     end
@@ -80,6 +81,15 @@ module NexoMail
         fresh?(id, stamp).tap { |fresh| @offered[id.to_s] = stamp.to_s if fresh }
       end
     end
+
+    # Finished items a listing settled without the model (a sender the reader fixed
+    # as ephemeral). Held in memory like the offered set and written by #commit, so
+    # they too are only on record once the run that listed them committed.
+    def route(items) = @routed.concat(Array(items))
+
+    # Is this item already on record? Asked before #commit, to tell a first filing
+    # from a thread that came back.
+    def known?(item) = @items.key?(item_key(item))
 
     def fresh?(id, stamp = nil)
       known = @seen[id.to_s]
@@ -101,8 +111,8 @@ module NexoMail
     # Merge this run's items, mark everything offered as seen, and persist. Returns
     # the items to brief from: everything kept, newest first, optionally only those
     # received on/after +keep_since+ (an ISO date — the caller's window, not ours).
-    def commit(items, keep_since: nil)
-      Array(items).each do |item|
+    def commit(items, keep_since: nil, keep_by_lane: nil)
+      (@routed + Array(items)).each do |item|
         next unless item.is_a?(Hash)
 
         key = item_key(item)
@@ -111,9 +121,10 @@ module NexoMail
       end
       @seen.merge!(@offered)
       @offered = {}
+      @routed = []
       @committed = true
       save
-      export(keep_since)
+      export(keep_since, keep_by_lane)
     end
 
     # True once #commit ran in this process — how the workflow knows a source's
@@ -150,12 +161,16 @@ module NexoMail
 
     private
 
-    def export(keep_since)
-      cutoff = keep_since.to_s.strip[0, 10]
-      kept = @items.values
-      unless cutoff.to_s.empty?
+    # Each lane may carry its own cutoff (+by_lane+, lane => ISO date); a lane
+    # without one, and an item without a lane, falls back to +keep_since+. Both are
+    # the caller's dates — how long a lane is worth keeping is the skill's call.
+    def export(keep_since, by_lane = nil)
+      fallback = keep_since.to_s.strip[0, 10]
+      cutoffs = (by_lane || {}).to_h { |lane, date| [lane.to_s, date.to_s.strip[0, 10]] }.reject { |_, date| date.empty? }
+      kept = @items.values.select do |item|
+        cutoff = cutoffs[item["lane"].to_s] || fallback
         # ISO dates order as strings. An undated item cannot be proven stale: keep it.
-        kept = kept.select { |item| (date = item["received_at"].to_s[0, 10]).empty? || date >= cutoff }
+        cutoff.empty? || (date = item["received_at"].to_s[0, 10]).empty? || date >= cutoff
       end
       kept.sort_by { |item| item["received_at"].to_s }.reverse
     end

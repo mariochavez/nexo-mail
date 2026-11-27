@@ -97,6 +97,39 @@ upcoming, omit the schedule section entirely rather than filling it with history
   photography, any theme with signal) — follow
   [interest_radar](../interest_radar/SKILL.md).
 
+## 4b. Lanes — each kind of mail has its own place and its own lifetime
+
+Every extraction item carries a `lane`. It decides WHERE in the digest the item
+can appear and HOW LONG it stays. The single window of section 0 still bounds the
+money totals; everything else follows its lane. Dates come from `Today`'s
+`days_ago` — never subtract days yourself.
+
+| `lane` | Where it goes | Stays |
+|---|---|---|
+| `conversation` | `action` when it needs the reader, else `people` / `stories` / `fyi` | While the thread is open: an `action` card stays until a later message settles it. Other cards, `days_ago 30`. |
+| `money` | `finance` (section 2). Also an `action` card when a bill is due or a payment failed. | The section 0 window. |
+| `dev` | `dev` — ONE entry per `ref`, however many notifications arrived and through however many inboxes. Never an `action` or `fyi` card. | Open things stay. Merged, closed, released or passing: `days_ago 7` from the last activity, then gone. |
+| `reading` | `topics` (the radar). Never an `fyi` card. | The radar briefs the last 7 days (`days_ago 7`); an issue older than that no longer feeds a briefing. |
+| `opportunity` | `opportunities`, soonest deadline first. | Until its `deadline` (or `starts`, when there is no deadline) is before `today`. Undated: `days_ago 30`. |
+| `jobs` | `jobs`, newest first. | `days_ago 14`. |
+| `ephemeral` | Nowhere. It is counted in `counts.ephemeral` and nothing else. | — |
+
+**`dev` entries.** Group every `dev`-lane item by its `dev.ref` and write one entry:
+the latest `state`, the newest `updated_at`, how many notifications it gathered
+(`events`), `waiting_on_me` true when any unanswered one says so, and a `summary`
+of where it stands now — not a list of what happened. Order: `waiting_on_me` first,
+then open things by `updated_at`, then finished ones. **A `dev` item is never an
+`action` or `fyi` card**, even when it waits on the reader: the `dev` list leads
+with those and the dashboard flags them, so a card would only say it twice. Count
+them in the headline ("three reviews waiting"), not in `counts.action`.
+
+**A `meeting` always goes to `schedule`**, whatever its lane — an invitation to a
+gallery opening with a time and an RSVP is an appointment, not a deadline. An item
+that is in `schedule` is not also listed in `opportunities`.
+
+**Counts.** `counts.noise` is the noise that is NOT ephemeral; `counts.ephemeral` is
+the ephemeral tally. `counts.total` = `action + fyi + noise + ephemeral`.
+
 ## 5. One message, one surface (dedup across groups)
 
 A message must appear as a **card in exactly one place** — its *strongest* group —
@@ -134,13 +167,18 @@ Do not re-read the extraction files and do not re-emit sections that did not cha
    - Its `id` matches a card already in the digest → the thread moved. Replace that
      card with the new item; do not add a second one. If the move settles it (the
      reply arrived, the bill was paid), it may change bucket or drop out.
-   - Otherwise it is new: `noise` only raises `counts.noise`; anything else goes on
-     the one surface it is strongest on. A newsletter folds into its topic briefing;
-     a message that continues a story extends that story.
+   - Otherwise it is new, and its `lane` says where it can go (section 4b):
+     `ephemeral` only raises `counts.ephemeral`; other `noise` only raises
+     `counts.noise`; a `dev` item updates the entry for its `ref` (or adds one); a
+     `reading` item folds into its topic briefing; an `opportunity` or `jobs` item
+     joins that list; a message that continues a story extends that story.
 3. **Roll the digest forward to today**, even when `new_items` is empty:
    - drop `schedule` entries whose `start` is before `today`;
-   - drop cards, charges and briefing material dated before `window_start`. The
-     window moves when a new month begins — that run drops a lot, and it is correct.
+   - drop charges dated before `window_start`. The window moves when a new month
+     begins — that run drops a lot, and it is correct;
+   - drop whatever has outlived its lane (section 4b): finished `dev` entries a
+     week old, `opportunities` whose date has passed, `jobs` older than 14 days,
+     `fyi` cards older than 30. An `action` card is never dropped for age alone.
 4. **Money only when money changed.** If a new item carries a `payment`, or the
    window moved, call `SumPayments` ONCE with ONLY the new payments and
    `saved_since` set to `window_start`. The tool adds the charges the digest
@@ -152,7 +190,8 @@ Do not re-read the extraction files and do not re-emit sections that did not cha
 5. **Write `digest.update.json`** — as little as says what changed. A key you
    leave out is kept untouched, so never include a section just to repeat it.
    - **Lists change one entry at a time, under `edit`.** Do NOT re-write `action`,
-     `fyi`, `stories`, `people` or `topics` to add, replace or remove an entry:
+     `fyi`, `stories`, `people`, `topics`, `dev`, `opportunities` or `jobs` to add,
+     replace or remove an entry:
 
      ```json
      "edit": {
@@ -163,7 +202,8 @@ Do not re-read the extraction files and do not re-emit sections that did not cha
 
      `put` replaces the entry with the same identity where it stands, or adds it at
      the top; `drop` removes by identity. The identity is `id` for `action`/`fyi`,
-     `title` for `stories`, `name` for `people`, `topic` for `topics`. A card that
+     `title` for `stories`, `name` for `people`, `topic` for `topics`, `ref` for
+     `dev`, `id` for `opportunities` and `jobs`. A card that
      changes bucket is a `drop` from one list and a `put` into the other.
    - Everything else is replaced whole, as a top-level key: always `generated_at`
      (the timestamp from the prompt); `counts` whenever a list or the noise tally
@@ -202,7 +242,7 @@ you did not derive from the list you actually wrote.
 `counts.noise` is the exception: noise items are not emitted as an array, so it is a
 plain tally.
 
-`counts.total` MUST equal `action + fyi + noise` exactly. It is the count AFTER
+`counts.total` MUST equal `action + fyi + noise + ephemeral` exactly. It is the count AFTER
 de-duplication — not the number of items you read out of the source files. If you
 merged two copies of one newsletter into a single item, the total drops by one.
 
@@ -221,7 +261,7 @@ top-level keys that changed.
   "headline": "one sentence: the shape of the inbox today",
   "sources": ["Gmail", "HEY"],
   "skipped": { "Apple Mail": "reason it was skipped" },
-  "counts": { "action": 0, "fyi": 0, "noise": 0, "total": 0 },
+  "counts": { "action": 0, "fyi": 0, "noise": 0, "ephemeral": 0, "total": 0 },
   "action": [
     { "id": "", "sender": "", "sender_email": "", "subject": "", "summary": "",
       "category": "", "received_at": "", "topics": [], "sources": ["Gmail"] }
@@ -256,6 +296,18 @@ top-level keys that changed.
   "schedule": [
     { "title": "", "start": "", "end": "", "location": "", "link": "",
       "rsvp": false, "sender": "", "subject": "", "source": "" }
+  ],
+  "dev": [
+    { "ref": "owner/repo#123", "kind": "pr", "title": "", "state": "open",
+      "waiting_on_me": false, "summary": "", "updated_at": "", "events": 1,
+      "sources": ["HEY"] }
+  ],
+  "opportunities": [
+    { "id": "", "what": "", "deadline": "", "starts": "", "where": "", "link": "",
+      "sender": "", "summary": "", "topics": [] }
+  ],
+  "jobs": [
+    { "id": "", "sender": "", "subject": "", "summary": "", "received_at": "" }
   ]
 }
 ```
@@ -289,13 +341,19 @@ _<headline>_
 ## Schedule
 - <start> — <title> (<location>) · RSVP
 
+## Code
+- **<ref>** <title> — <state>: <where it stands>  (waiting on you first)
+
+## Deadlines
+- <deadline> — <what> (<where>)
+
 ## Radar
 - **<Label>** — <headline>
 
 ## FYI (<n>)
 - **<sender>** — <subject>: <why it matters>
 
-_<n> noise skipped · sources: <…> · <skipped notes>_
+_<n> noise skipped · <n> ephemeral · sources: <…> · <skipped notes>_
 ```
 
 Omit any section with nothing in it. Keep each line to one sentence.

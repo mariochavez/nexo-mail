@@ -32,13 +32,17 @@ module NexoMail
           the `payment` amount and merchant.
         - "setaside": mail the reader deliberately parked -> usually fyi.
 
-        At most 40 postings per box, newest first. Pass `since` (an ISO date) to drop
+        At most 40 postings per box, newest first; `more_waiting` counts untriaged
+        postings beyond that, which the next run will list. Pass `since` (an ISO date) to drop
         anything older — you decide how far back the briefing reaches; this tool does
         not know what today is.
 
         Returns only postings an earlier run has NOT already triaged, plus any whose
         thread has had new activity since; `already_triaged` counts what was left out.
         An empty box means nothing new arrived there.
+
+        A posting may carry `lane`: where this sender's mail has gone before. Treat it
+        as the default for that message.
 
         Every posting carries a `snippet` (~200 characters of the message). Classify
         from it, and read amounts straight out of it when it shows one. Only reach for
@@ -71,9 +75,10 @@ module NexoMail
           )
         end
 
-        listed = fetch(names, limit)
+        listed = fetch(names)
+        shown = (limit || Config.hey_box_limit).to_i.clamp(1, 200)
         JSON.generate(
-          boxes: listed.filter_map { |box, data| box_result(box, data, snippet_chars, cutoff(since)) },
+          boxes: listed.filter_map { |box, data| box_result(box, data, snippet_chars, cutoff(since), shown) },
           errors: listed.filter_map { |box, data| error_result(box, data) }
         )
       end
@@ -83,26 +88,40 @@ module NexoMail
       # One `hey` subprocess per box, up to Config.hey_concurrency in flight. Returns
       # [canonical_name, parsed_payload] pairs; a per-box failure is a payload with an
       # :error key, so one broken box never costs the others.
-      def fetch(names, limit)
-        per_box = (limit || Config.hey_box_limit).to_i.clamp(1, 200).to_s
+      #
+      # Fetches MORE than it will show (Config.hey_fetch_limit): the cap on what the
+      # model sees is applied after the ledger has removed what it already triaged,
+      # so mail deeper than one listing is reached on a later run. Capping the fetch
+      # itself meant anything past the newest 40 of a box was never triaged at all.
+      def fetch(names)
+        per_box = Config.hey_fetch_limit.to_s
         payloads = Pool.map(names, size: Config.hey_concurrency) do |name|
           Hey.run("box", Hey.cli_name(name), "--limit", per_box, "--json")
         end
         names.zip(payloads)
       end
 
-      def box_result(box, data, snippet_chars, cutoff)
+      def box_result(box, data, snippet_chars, cutoff, shown)
         postings = data.is_a?(Hash) ? data.dig("data", "postings") : nil
         return nil unless postings.is_a?(Array)
 
         chars = (snippet_chars || Config.hey_snippet_chars).to_i.clamp(0, 1_000)
         recent = postings.select { |p| cutoff.nil? || recent?(p, cutoff) }
+        ledger = Ledger.for(LEDGER)
         # A posting is new again when its thread moved: `active_at` is the stamp.
-        fresh = Ledger.for(LEDGER).take(recent) { |p| [p["id"], p["active_at"] || p["created_at"]] }
+        stamp = ->(p) { p["active_at"] || p["created_at"] }
+        unseen = recent.select { |p| ledger.fresh?(p["id"], stamp.call(p)) }
+        # Only what is shown is offered: the rest stays unseen and is listed next run.
+        fresh = ledger.take(unseen.sort_by { |p| stamp.call(p).to_s }.last(shown)) { |p| [p["id"], stamp.call(p)] }
         rows = fresh.map { |p| Hey.project(p, snippet_chars: chars) }
           .sort_by { |p| p[:date].to_s }.reverse
+        rows, routed = SenderMemory.route(rows) do |row|
+          {id: row[:id], sender: row[:from], sender_email: row[:from_email], subject: row[:subject], received_at: row[:date]}
+        end
+        ledger.route(routed)
 
-        {box: box, label: Hey.label(box), count: rows.size, already_triaged: recent.size - fresh.size, postings: rows}
+        {box: box, label: Hey.label(box), count: rows.size, already_triaged: recent.size - unseen.size,
+         more_waiting: unseen.size - fresh.size, routed_ephemeral: routed.size, postings: rows}
       end
 
       def error_result(box, data)

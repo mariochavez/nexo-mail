@@ -49,6 +49,7 @@ lib/nexo_mail/
   cli.rb                    # NexoMail::CLI — the runner (OptionParser + UI, thin)
   snapshots.rb              # NexoMail::Snapshots — create/list/prune (used by tools)
   ledger.rb                 # NexoMail::Ledger — what each inbox already triaged (used by tools)
+  sender_memory.rb          # NexoMail::SenderMemory — sender → lane (reader's rules + learned tally)
   digest_file.rb            # NexoMail::DigestFile — full/update/current plan + key-level commit
   sources.rb                # NexoMail::Sources — the source catalog (descriptors)
   agents/                   # SourceAgent base + EmailSource (data-driven, tool-based
@@ -385,6 +386,33 @@ parses no JSON, renders nothing.
   not bytes. The seed-once gotcha applies: `inbox_synthesis` must be copied over an
   existing install, or the agent follows the old skill and writes `digest.json`
   directly (which then never commits, and the run suspends).
+- **Every item has a LANE, and the lane — not one window — decides where it shows
+  and how long it lives.** `conversation`, `money`, `dev`, `reading`, `opportunity`,
+  `jobs`, `ephemeral` (`SenderMemory::LANES`). The rules are skill text: `email_triage`
+  assigns the lane (plus a `dev` record keyed by `ref`, e.g. `owner/repo#123`, and an
+  `opportunity` record with `deadline`/`starts`); `inbox_synthesis` §4b maps lanes to
+  digest sections — `dev` (ONE entry per `ref`, however many notifications and
+  inboxes), `opportunities`, `jobs`, `counts.ephemeral` — and gives each its lifetime.
+  Ruby only carries it: `CommitExtraction(keep_by_lane:)` takes a cutoff per lane,
+  and `Tools::Today` returns `days_ago` (7/14/30/90) so the model never subtracts
+  days — still a clock, not a policy. The three new lists are entry-editable in
+  `DigestFile::EDITABLE` and rendered by the template (`devSec`, `oppSec`, `jobsSec`).
+- **`NexoMail::SenderMemory` asks the lane question once per sender.** Two sources,
+  not equals. FIXED: the reader's `Config.senders_file` (`senders.toml`, address or
+  domain → lane; address beats domain, a domain covers its subdomains). It is
+  authoritative — `CommitExtraction` stamps it over whatever the model wrote, and a
+  sender fixed as `ephemeral` never reaches the model: the listing tools hand its
+  rows to `Ledger#route` as finished minimal items (`routed: true`), committed with
+  the rest. LEARNED: a per-address tally in `ledger/senders.json` of the lanes first
+  filings were given; unanimous after `SETTLE` (2) filings, it rides on listing rows
+  as a `lane` HINT the model may override. A learned `ephemeral` is only ever a hint —
+  auto-skipping on a guess would silently drop the one refund notice from a shop
+  that usually sends promotions. `--reset-ledger` clears the tally with the ledgers.
+- **HEY fetches more than it shows.** `hey box --limit` is `Config.hey_fetch_limit`
+  (200); the ledger filter runs first and only the newest `hey_box_limit` (40)
+  untriaged postings per box are offered, the rest reported as `more_waiting` and
+  listed next run. Capping the fetch itself meant mail past the newest 40 of a box
+  was never triaged at all.
 - **Snapshots live in `Config.snapshots_dir`** (state), separate from the sandbox.
   Because the sandbox is fenced, agents reach snapshots ONLY via the `ArchiveRun` /
   `PruneSnapshots` tools. Each run archives `digest.json` + `dashboard.html` +

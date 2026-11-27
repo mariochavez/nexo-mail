@@ -1,0 +1,23 @@
+# Sender → lane rules. Copy to ~/.config/nexo-mail/senders.toml and edit.
+#
+# A rule here is final: mail from that sender is filed in that lane whatever the
+# model would have said. Without a rule the agent decides, and once it has filed a
+# sender in the same lane twice that lane is suggested for the sender's next mail.
+#
+# The key is a full address or a domain; an address beats its domain, and a domain
+# covers its subdomains ("github.com" also matches noreply.github.com).
+#
+# Lanes:
+#   conversation  people and threads you are part of
+#   money         receipts, bills, statements, payouts
+#   dev           GitHub, CI, RubyGems, error trackers, Slack digests
+#   reading       newsletters and publishers you read for their content
+#   opportunity   open calls, workshops, launches, fairs — things with a date
+#   jobs          job boards and alerts
+#   ephemeral     codes, tracking, promotions. A sender fixed as ephemeral is never
+#                 shown to the model at all: it is counted and nothing else.
+
+# "github.com" = "dev"
+# "mackbooks.co.uk" = "reading"
+# "weekly.calmcompanies.club" = "jobs"
+# "promotions@some-shop.example" = "ephemeral"

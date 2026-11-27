@@ -91,6 +91,14 @@ arrived since the last one — plus any thread that has moved — and merges it 
 what was extracted before. A run that dies before it commits marks nothing as read.
 `--reset-ledger` starts over.
 
+Mail is sorted into **lanes** — conversation, money, dev, reading, opportunity,
+jobs, ephemeral — and each is kept and shown its own way: one line per pull request
+instead of one per notification, a deadline list for open calls and workshops, a
+7-day reading radar, and a bare count for codes and promotions. To pin a sender to
+a lane yourself, copy `data/senders.example.toml` to
+`~/.config/nexo-mail/senders.toml`; a sender pinned as `ephemeral` is never sent to
+the model at all.
+
 The digest is kept the same way. A run hands the digest agent only the items triaged
 since the digest was last saved, and it rewrites just the entries and sections they
 touch; with nothing new and a digest already built today, the run stops after the

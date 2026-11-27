@@ -66,6 +66,9 @@ flavor = "mocha"
 # `nexo-triage --reset-ledger` forgets it all and makes the next run a full re-read.
 # ledger_dir = "${XDG_STATE_HOME:-~/.local/state}/nexo-mail/ledger"
 
+# Sender → lane rules you write yourself (see data/senders.example.toml).
+# senders_file = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/senders.toml"
+
 # The digest is kept, not rebuilt: a run hands the digest agent only the items
 # triaged since the digest was last saved, and it rewrites just the sections they
 # touch. With nothing new and a digest already built today, the run stops after the
@@ -113,6 +116,8 @@ flavor = "mocha"
 # gmail_read_max_uids   = 25      # UIDs one batched body read accepts   (1..100)
 # gmail_body_chars      = 4000    # body chars per message read          (200..20000)
 # hey_box_limit         = 40      # postings per HEY box                 (1..200)
+# hey_fetch_limit       = 200     # postings fetched per box before the
+#                                 # already-triaged ones are removed    (1..500)
 # hey_snippet_chars     = 200     # HEY caps its own summary at 200      (0..1000)
 # hey_thread_max_ids    = 15      # ids one batched thread read accepts  (1..50)
 # hey_body_chars        = 4000    # body chars per HEY thread entry      (200..20000)

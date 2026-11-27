@@ -185,7 +185,8 @@
   var meta={sources:A(D.sources),skipped:D.skipped||{},counts:D.counts||{}};
   var fin=D.finance||{}, byCur=fin.by_currency||{}, dom=fin.dominant_currency,
       action=A(D.action), fyi=A(D.fyi), sched=A(D.schedule), topics=A(D.topics),
-      people=A(D.people), stories=A(D.stories);
+      people=A(D.people), stories=A(D.stories),
+      dev=A(D.dev), opps=A(D.opportunities), jobs=A(D.jobs);
   var now=parseDate(D.generated_at)||new Date();
   var storeKey="inbox-briefing:done:"+(D.generated_at||"");
   var done=loadDone();
@@ -209,10 +210,13 @@
   // ---- sections ----
   var main=el("div",{class:"main"}), rail=el("aside",{class:"rail"});
   main.appendChild(todoSec());
+  if(dev.length) main.appendChild(devSec());
   if(topics.length) main.appendChild(radarSec());
   if(stories.length) main.appendChild(threadSec());
   if(fyi.length) main.appendChild(fyiSec());
+  if(jobs.length) main.appendChild(jobsSec());
   if(sched.length) rail.appendChild(schedSec());
+  if(opps.length) rail.appendChild(oppSec());
   if(Object.keys(byCur).length||A(fin.charges).length) rail.appendChild(moneySec());
   if(people.length) rail.appendChild(peopleSec());
   app.appendChild(el("div",{class:"layout"},main,rail.childNodes.length?rail:null));
@@ -220,7 +224,7 @@
   app.appendChild(el("footer",null,
     el("span",null,"Compiled "+fmtDate(D.generated_at)),
     el("span",null,meta.sources.join(" · ")||"no sources"),
-    el("span",null,(meta.counts.total||0)+" messages triaged"+(meta.counts.noise?", "+meta.counts.noise+" set aside as noise":""))));
+    el("span",null,(meta.counts.total||0)+" messages triaged"+(meta.counts.noise?", "+meta.counts.noise+" set aside as noise":"")+(meta.counts.ephemeral?", "+meta.counts.ephemeral+" ephemeral":""))));
 
   buildTabs(); recount(); wire();
 
@@ -320,6 +324,52 @@
     return s;
   }
 
+  // One row per pull request, issue or other dev thing — its state, not its history.
+  function devPill(d){
+    if(d.waiting_on_me)return el("span",{class:"pill red"},"Waiting on you");
+    var st=String(d.state||"").toLowerCase(), cls={merged:"green",passing:"green",released:"green",failing:"red",closed:"plain"}[st]||"blue";
+    return st?el("span",{class:"pill "+cls},st):null;
+  }
+  function devSec(){
+    var LIMIT=8, sb=el("div",{class:"sb"}), s, waiting=dev.filter(function(d){return d.waiting_on_me;}).length;
+    dev.forEach(function(d,i){
+      var n=Number(d.events)||0;
+      sb.appendChild(el("div",{class:"row"+(i>=LIMIT?" x":""),"data-s":""},
+        el("div",{class:"who",title:d.ref||""},String(d.ref||"(unknown)").split("/").pop()),
+        el("div",{class:"body"},el("div",{class:"subj clamp",title:d.title||""},d.title||d.ref||""),
+          d.summary?el("div",{class:"sum clamp"},d.summary):null),
+        el("div",{class:"age"},devPill(d),el("div",null,ago(d.updated_at)+(n>1?" · "+n+" updates":"")))));});
+    s=sec("dev","b","Code",waiting?waiting+" waiting on you":String(dev.length),sb,expander(function(){return s;},dev.length-LIMIT));
+    return s;
+  }
+  function jobsSec(){
+    var LIMIT=4, sb=el("div",{class:"sb"}), s;
+    jobs.forEach(function(it,i){
+      sb.appendChild(el("div",{class:"row"+(i>=LIMIT?" x":""),"data-s":""},
+        el("div",{class:"who",title:it.sender||""},it.sender||"(unknown)"),
+        el("div",{class:"body"},el("div",{class:"subj clamp",title:it.subject||""},it.subject||"(no subject)"),
+          it.summary?el("div",{class:"sum clamp"},it.summary):null),
+        el("div",{class:"age"},ago(it.received_at))));});
+    s=sec("jobs","n","Jobs",String(jobs.length),sb,expander(function(){return s;},jobs.length-LIMIT));
+    return s;
+  }
+  // Things with a date to act by. The date shown is the deadline when there is one.
+  function oppSec(){
+    var sb=el("div",{class:"sb"});
+    opps.forEach(function(o){
+      var when=o.deadline||o.starts, d=parseDate(when), days=d?Math.ceil((d-now)/864e5):null;
+      var left=days==null?null:(days<=0?"Today":days===1?"Tomorrow":(o.deadline?days+" days left":"In "+days+" days"));
+      var where=[o.deadline&&o.starts?"starts "+fmtDate(o.starts):null,o.where,o.sender].filter(Boolean).join(" · ");
+      var link=/^https?:\/\//.test(String(o.link||""))?el("a",{href:o.link,target:"_blank",rel:"noopener noreferrer"},o.what||"Opportunity"):(o.what||"Opportunity");
+      sb.appendChild(el("div",{class:"ev","data-s":""},
+        el("div",{class:"d"},el("div",{class:"mo"},d?d.toLocaleDateString(undefined,{month:"short"}):"TBD"),
+          el("div",{class:"dy"},d?d.getDate():"·")),
+        el("div",null,el("div",{class:"w"},link),
+          where?el("div",{class:"m"},where):null,
+          left?el("span",{class:"pill "+(days<=7?"amber":"plain")},left):null)));});
+    return sec("deadlines","g","Deadlines",String(opps.length),sb);
+  }
+
   function schedSec(){
     var sb=el("div",{class:"sb"});
     sched.forEach(function(e){
@@ -389,6 +439,9 @@
     var due=totalDue();
     tab("money",due?"due":"Money",due?money(due.amount,due.currency):null,due?"warn":"");
     tab("schedule",sched.length===1?"event":"events",String(sched.length));
+    var waiting=dev.filter(function(d){return d.waiting_on_me;}).length;
+    tab("dev",waiting?"code waiting":"Code",String(waiting||dev.length),waiting?"hot":"");
+    tab("deadlines",opps.length===1?"deadline":"deadlines",String(opps.length));
     tab("radar","Radar",String(topics.length));
     tab("threads","Threads",String(stories.length));
     tab("fyi","FYI",String(fyi.length));
