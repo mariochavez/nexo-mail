@@ -100,7 +100,7 @@ parses no JSON, renders nothing.
 - **Models**: no default. `Config.active_model(cli_alias)` picks `--model`, else
   `NEXO_MAIL_MODEL`, else the first `[[models]]`. One model runs per invocation, so
   the CLI mutates `RubyLLM.configure` globally and calls
-  `Agents::SourceAgent.configure_model!(m)` (sets provider/model on every triage
+  `Agents::Base.configure_model!(m)` (sets provider/model on every agent
   class) — do NOT reach for `RubyLLM.context`.
 - **Skills** load from the XDG skills dir (`Config.skills_dir`), seeded copy-if-missing
   from `data/skills/`. Editing the XDG copy is the override. `nexo`'s `skills_path`
@@ -111,11 +111,13 @@ parses no JSON, renders nothing.
   `~/.config/nexo-mail/skills/<name>/SKILL.md` wins. When iterating on skills for a
   live user, `cp` the updated file over their `Config.skills_dir` copy (or delete it
   so bootstrap re-seeds). This is by design — editing the XDG copy IS the override.
-- **Downstream agents inherit `SourceAgent` but must RESET skills** with a direct
-  `@skills = %i[...]` ivar assignment (see `Synthesize`/`Publisher`/`Archivist`).
-  Nexo's `inherited` copies `@skills` (a CONFIG_IVAR) to the subclass, and the
-  `skills` *macro only accumulates* — so `skills :x` would ADD to the inherited
-  extraction skills instead of replacing them. `instructions`, by contrast, replaces.
+- **Every agent inherits `Agents::Base`; only mail-reading ones inherit `SourceAgent`.**
+  `Base` holds what all share (sandbox, permissions, the `today` tool, prompt
+  fragments, the model). `SourceAgent < Base` adds the extraction skills and triage
+  instructions. `Synthesize`/`Publisher`/`Archivist` inherit `Base` directly and
+  declare their own `skills`. Do NOT make a downstream agent a `SourceAgent`: Nexo's
+  `skills` macro only accumulates, so it would inherit the extraction skills (the old
+  code worked around that by poking `@skills`).
 - **Agents DECLARE their output with `produces`; the workflow records it** (nexo_ai
   >= 0.9). `Synthesize` produces `digest.json` + `inbox-digest.md`, `Publisher`
   produces `dashboard.html`, and `MultiInboxTriage` calls `collect_artifacts(agent)`
@@ -143,57 +145,45 @@ parses no JSON, renders nothing.
   `CLI#configure_model!` sets `Nexo.config.run_store = Nexo::RunStore::Disk.new(dir:
   Config.runs_dir)` (nexo_ai >= 0.10). Nexo's default store is in-memory and dies
   with the process, so checkpoints/suspend/artifacts would all be unreadable next
-  invocation. The workflow wraps stage 1 in `checkpoint(:extract) { fan_out_sources
-  }` and calls `suspend!` when synthesis wrote no `digest.json` — "suspended" is a
-  NON-failure, and `--resume` re-enters `#call` from the top where the checkpoint
-  short-circuits the three inboxes. `suspend!` must be OUTSIDE the checkpoint.
-  The checkpoint stores the `{source => filename}` map, not the mail — the files
+  invocation. The workflow runs stage 1 as `checkpoint_all(source name => lambda)`:
+  each source is its OWN checkpoint, persisted as it finishes, so a resume re-reads
+  only an inbox that never landed. It calls `suspend!` when synthesis wrote no
+  `digest.json` — "suspended" is a NON-failure, and `--resume` re-enters `#call` from
+  the top where the checkpoints short-circuit the inboxes. `suspend!` must be OUTSIDE
+  a checkpoint. `extract_source` must NEVER raise: a raising step fails the run and
+  stops the other sources. A failed source checkpoints as `nil` and is not retried.
+  Each checkpoint stores that source's filename, not the mail — the files
   live in the workspace. `Workflow.resume` only accepts a `"suspended"` run, so a
   `"failed"` one is NOT resumable; that is why the workflow suspends deliberately
   instead of letting the stage swallow the error. Nexo never prunes run documents
   (`CLI#trim_runs` keeps `Config.runs_keep`).
-- **The Publisher's sandbox is CONFIG-DRIVEN and Nexo owns it.**
-  `Agents::Publisher.sandbox` is a lazy READER override returning `:local` or a
-  container options Hash from `[dashboard] sandbox` / `image`
-  (local|confined|docker|apple, default local). `confined` is still a `Sandboxes::Local`
-  on the shared workspace (so `shares_workspace?` holds) with `isolation: :confined`
-  and `readable: [Config.dashboard_ruby_prefix]` — without that grant ruby starts but
-  cannot load its stdlib. `Config.dashboard_containerized?` is true ONLY for
-  docker/apple. Because the agent RESOLVES it rather than being handed one, Nexo
-  also closes it in `Agent#close` — never inject via `new(sandbox:)` here, that makes
-  it borrowed and you own the teardown (a leaked container per run). The container is
-  `network: :none` + cap-drop + read-only rootfs; `readonly_rootfs` is forced FALSE
-  for `apple`, which cannot write under it. `hardening_gaps` is emitted, not ignored.
-- **Containerized, `digest.json` goes IN and `dashboard.html` comes OUT by hand.**
-  Docker REFUSES a bind at the tmpfs scratch path (`Duplicate mount point:
-  /workspace`, verified), so there is no shared-directory shortcut. `hand_over_inputs`
-  copies the digest sandbox-to-sandbox reading from the WORKSPACE (the file the
-  previous stage wrote is the source of truth, not the run record — the run record
-  copy may be missing if synthesis failed to record). `collect_declared` picks the
-  reader with `shares_workspace?`: Nexo's `collect_artifacts` resolves declared names
-  through the WORKFLOW's sandbox and cannot see a container's, so `import_artifacts`
-  reads through `agent.sandbox` and MIRRORS into the workspace root — the Archivist
-  and the CLI both look there. `shares_workspace?` tolerates a duck with no
-  `#sandbox`, matching Nexo's own guard.
-- **Two `[dashboard]` knobs change meaning in a container.** `ruby` pins a HOST
-  interpreter, so `publisher_ruby` uses the image's `ruby` instead; an absolute
-  `template`/`renderer` override is a host path the container cannot see, so
-  `in_workspace` falls back to the staged copy and emits `publisher_override_ignored`.
-  Both are loud, never silent.
+- **The Publisher's shell is fenced by CONFIG, and the workspace is always shared.**
+  `Agents::Publisher.sandbox` is a lazy READER override over `[dashboard] sandbox`
+  (local|confined|docker|apple). Every value is a `Sandboxes::Local` on the shared
+  workspace; what differs is its `isolation:` — none, `:confined` (mxc), or a
+  `Nexo::Sandboxes::ContainerRunner` (a hardened, network-less container PER COMMAND
+  with only the workspace bound in, at its own host path). So no stage has a
+  workspace of its own and nothing is copied in or out (the old `hand_over_inputs` /
+  `import_artifacts` / `shares_workspace?` / `in_workspace` are gone).
+  UNSET, the value is `confined` where `Config.confinement_available?` and `local`
+  otherwise; an explicit `confined` that cannot run raises at render time.
+  `readable:` comes from `Config.dashboard_readable`: the directory of an absolute
+  `template`/`renderer` override, plus (confined only) `dashboard_ruby_prefix` —
+  without it ruby starts but cannot load its stdlib. `Config.dashboard_containerized?`
+  is true ONLY for docker/apple and only decides `publisher_ruby` (the image's `ruby`
+  vs the pinned host one). The sandbox dir must be shared with the container VM
+  (the home directory is, on OrbStack/Docker Desktop). `hardening_gaps` is emitted.
 - **A skill states its needs in `compatibility:`** — the Agent Skills spec's own
   frontmatter field, which nexo_ai >= 0.9 appends to the model's instructions.
   `dashboard_designer` uses it to say it needs a Ruby 3.0+ interpreter and the shell
   tool, and that there is no fallback. Subject to the SAME seed-once gotcha as the
   rest of the skill: editing `data/skills/*/SKILL.md` does not reach an existing
   install — `cp` it over `Config.skills_dir`.
-- **`SourceAgent.configure_model!` has a hardcoded roster** of every triage class
-  (`[SourceAgent, EmailSource, AppleMailSource, Synthesize, Publisher, Archivist]`).
-  Add any NEW agent CLASS here or it runs with no model/provider set. A new
-  tool-based *source* adds only a `Sources` descriptor — no class, so the roster
-  stays fixed; a new agent class (or an MCP source like Apple Mail) still needs a
-  roster entry.
+- **`Base.configure_model!` finds the agent classes itself** (loads every constant
+  under `Agents`, then walks `Base`'s subclasses). A new agent class needs no entry
+  anywhere — but it must inherit `Agents::Base`.
 - **Host tools are declared with Nexo's `tools` macro (nexo_ai >= 0.14), never by
-  calling `with_tools` in `#chat`.** `SourceAgent` declares `Tools::Today` for everyone;
+  calling `with_tools` in `#chat`.** `Base` declares `Tools::Today` for everyone;
   `Synthesize` adds `SumPayments`; `EmailSource` adds a lambda reading its descriptor;
   `Archivist` declares `ArchiveRun`/`PruneSnapshots` with `capability: :write`, which
   wraps them in `Nexo::GatedTool` (allowed because the shared permissions grant

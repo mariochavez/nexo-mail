@@ -158,45 +158,37 @@ Two audiences, two mechanisms: `requires` is checked and fails the run; the skil
 `compatibility:` is appended to the model's instructions so it knows what it is
 working with and can say so plainly instead of improvising HTML.
 
-### Where the one shell runs — an optional container
+### Where the one shell runs — fenced by default
 
 The Publisher is the only agent holding `:shell`, and the only one that reaches no
-mail and needs no network. That makes it the single stage that can be moved off the
-host without changing what the pipeline can do:
+mail and needs no network. That makes it the single stage whose shell can be fenced
+without changing what the pipeline can do:
 
 ```toml
 [dashboard]
-sandbox = "docker"          # local (default) | docker | apple
-image   = "ruby:3.3-slim"
+sandbox = "confined"        # confined | docker | apple | local
+image   = "ruby:3.3-slim"   # docker / apple only
 ```
 
-The choice lives on the agent, as a lazy reader over the `sandbox` macro, so Nexo
-**resolves, owns and tears down** the container itself — `Agent#close` closes a
-sandbox it resolved, and there is no teardown code here to forget. The container runs
-with `network: :none`, `--cap-drop ALL` and a read-only rootfs over an ephemeral
-`/workspace` scratch. Where a runtime cannot honor a hardening flag it says so
-(`hardening_gaps`), and that is emitted rather than shrugged off — an omitted flag
-means weaker isolation than was asked for. Apple's runtime cannot write under a
-read-only rootfs at all, so it opts out of that one.
+| Value | What a shell command can reach |
+|---|---|
+| `confined` | An OS sandbox (Seatbelt on macOS, Bubblewrap on Linux): writes only inside the workspace, no home directory, no network. Used when the setting is absent, wherever it can run. |
+| `docker` / `apple` | A throwaway container per command: no network, capabilities dropped, read-only root, only the workspace bound in. |
+| `local` | An ordinary host process. Unfenced, and `--check` says so. |
 
-This is also where the artifact plumbing stops being belt-and-braces. On `:local`
-every stage shares one directory, so recording artifacts is insurance. In a container
-the workspace ceases to exist when the stage ends, so `digest.json` must be handed
-**in** and `dashboard.html` carried back **out** — and `collect_artifacts`, which
-resolves declared names through the *workflow's* sandbox, cannot see the agent's.
-The workflow asks the agent which sandbox it has and reads through that one, then
-mirrors the result into the shared workspace so the Archivist and the CLI find it
-exactly where a `:local` run would have left it.
+All of them are the same Nexo seam: a `:local` sandbox whose shell runs through an
+`isolation:`. The files are always the shared workspace, so no stage has a workspace
+of its own and nothing is copied in or out — `digest.json` is where synthesis left it
+and `dashboard.html` lands where the Archivist and the CLI look for it.
 
-Two knobs change meaning inside a container, and both fail loudly rather than
-quietly: `[dashboard] ruby` pins a *host* interpreter, so the image's own `ruby` is
-used instead (choosing the image is how you choose it), and an absolute
-`template`/`renderer` override is a host path the container cannot see, so the staged
-copy is used and `publisher_override_ignored` is emitted.
+Two details. `[dashboard] ruby` pins a *host* interpreter; inside a container the
+image's own `ruby` is used (choosing the image is how you choose it). An absolute
+`template`/`renderer` override is granted read-only to the fence, so it works in every
+mode.
 
-`nexo-triage --check` probes whichever sandbox the Publisher declares, so the
-preflight tells you `docker · ruby:3.3-slim → ✓ ruby 3.3.12` — or that your image
-ships no Ruby at all.
+`nexo-triage --check` probes whichever fence the Publisher declares, so the preflight
+tells you `shell: docker · ruby:3.3-slim → ✓ ruby 3.3.14` — or that your image ships
+no Ruby at all.
 
 ### A run that pauses instead of dying
 
@@ -205,7 +197,7 @@ synthesis then fails — a flaky model, malformed output — throwing that away 
 starting over is the wrong shape. So it isn't thrown away:
 
 ```ruby
-produced = checkpoint(:extract) { fan_out_sources(available) }
+produced = checkpoint_all(available.transform_values { |source| -> { extract_source(source) } }).compact
 drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
 suspend!(reason: "synthesis produced no digest.json") unless File.exist?(...)
 ```

@@ -2,20 +2,14 @@
 
 module NexoMail
   module Agents
-    # Builds the digest. Inherits the shared triage config (model, :local sandbox +
-    # read/write) but attaches NO mail tools — it reads the per-source extraction
+    # Builds the digest. Attaches NO mail tools — it reads the per-source extraction
     # files each source agent wrote into the workspace and merges them into ONE
     # picture: deduped items, rolled-up money, ordered schedule, narrative stories,
     # per-person detail and per-topic radar. It writes two files: `digest.json`
-    # (canonical data) and `inbox-digest.md` (the terminal digest).
-    #
-    # It swaps the extraction skills for the synthesis ones — its guidance is about
-    # connecting, rolling up, and narrating, not reading inboxes.
-    class Synthesize < SourceAgent
-      # Reset the skills inherited from SourceAgent's extraction set — the synthesis
-      # agent builds the digest, it doesn't read inboxes. The `skills` macro only
-      # accumulates, so override the inherited class ivar directly.
-      @skills = %i[inbox_synthesis financial_summary interest_radar]
+    # (canonical data) and `inbox-digest.md` (the terminal digest). Its skills are
+    # about connecting, rolling up, and narrating, not reading inboxes.
+    class Synthesize < Base
+      skills :inbox_synthesis, :financial_summary, :interest_radar
 
       def self.prompt_key = "synthesize"
 

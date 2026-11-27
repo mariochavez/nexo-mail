@@ -101,15 +101,20 @@ module NexoMail
       val("NEXO_MAIL_DASHBOARD_RUBY", data.dig("dashboard", "ruby"), "ruby")
     end
 
-    # Which sandbox the Publisher renders in: "local" (default — the shared
-    # workspace, same as every other agent) or "docker" / "apple" (a throwaway
-    # container). The Publisher is the only agent holding :shell and it reaches no
-    # mail, so it is the one stage that can be isolated at no cost to the pipeline.
-    # An unknown value is an explicit error, never a silent fall back to the host.
+    # What fences the Publisher's shell: "confined" (an OS sandbox), "docker" /
+    # "apple" (a container per command) or "local" (nothing). The Publisher is the
+    # only agent holding :shell and it reaches no mail, so it is the one stage that
+    # can be fenced at no cost to the pipeline.
+    #
+    # Unset, it is "confined" wherever the OS sandbox can run and "local" where it
+    # cannot — the safest thing that works, never a silent downgrade of something
+    # you asked for: an explicit "confined" that cannot run is an error at render
+    # time, and an unknown value is an error here.
     DASHBOARD_SANDBOXES = %w[local confined docker apple].freeze
 
     def dashboard_sandbox
-      value = val("NEXO_MAIL_DASHBOARD_SANDBOX", data.dig("dashboard", "sandbox"), "local").to_s.strip.downcase
+      value = val("NEXO_MAIL_DASHBOARD_SANDBOX", data.dig("dashboard", "sandbox"), nil).to_s.strip.downcase
+      return (confinement_available? ? "confined" : "local") if value.empty?
       return value if DASHBOARD_SANDBOXES.include?(value)
 
       raise NexoMail::Error,
@@ -118,8 +123,29 @@ module NexoMail
 
     def dashboard_containerized? = %w[docker apple].include?(dashboard_sandbox)
 
-    # The install prefix of the interpreter `[dashboard] ruby` names, for a confined
-    # shell to be allowed to read (see Agents::Publisher.confined_sandbox). Found by
+    # Whether the OS sandbox behind "confined" can run on this machine. Asked once.
+    def confinement_available?
+      return @confinement_available unless @confinement_available.nil?
+
+      require "mxc"
+      @confinement_available = ::RubyLLM::Sandbox.resolve(::MXC::Sandbox.new).supported? == true
+    rescue LoadError, StandardError
+      @confinement_available = false
+    end
+
+    # What a fenced render command may READ besides the workspace: the directory of
+    # a `[dashboard] template` / `renderer` override (an absolute host path), and —
+    # for the OS sandbox, which runs the host's own interpreter — that interpreter's
+    # install. Without the latter ruby starts and then cannot load its stdlib.
+    def dashboard_readable(ruby: true)
+      overrides = [val("NEXO_MAIL_DASHBOARD_TEMPLATE", data.dig("dashboard", "template")),
+        val("NEXO_MAIL_DASHBOARD_RENDERER", data.dig("dashboard", "renderer"))]
+      paths = overrides.compact.map { |path| File.dirname(File.expand_path(path)) }
+      paths << dashboard_ruby_prefix if ruby
+      paths.compact.uniq
+    end
+
+    # The install prefix of the interpreter `[dashboard] ruby` names. Found by
     # walking PATH and resolving shims and symlinks; nil when it cannot be found, in
     # which case the confined render fails loudly rather than guessing.
     def dashboard_ruby_prefix
