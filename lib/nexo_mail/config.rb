@@ -29,6 +29,11 @@ module NexoMail
     # into a timestamped subdirectory here; `nexo-triage --prune-snapshots` trims them.
     def snapshots_dir = path("NEXO_MAIL_SNAPSHOTS_DIR", data["snapshots_dir"], File.join(state_home, APP, "snapshots"))
 
+    # What each inbox has already been triaged into (see NexoMail::Ledger). State,
+    # and the one piece worth keeping: deleting it only costs a full re-read, but it
+    # is also where an inbox's history lives. `nexo-triage --reset-ledger` clears it.
+    def ledger_dir = path("NEXO_MAIL_LEDGER_DIR", data["ledger_dir"], File.join(state_home, APP, "ledger"))
+
     # Where Nexo persists this CLI's workflow runs. State, like snapshots: a run
     # document holds the run's status, event log, checkpoints and recorded
     # artifacts, and it is what `--resume` reads back after the process is gone.

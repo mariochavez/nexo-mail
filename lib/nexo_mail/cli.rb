@@ -30,6 +30,7 @@ module NexoMail
 
       return print_check if opts[:check]
       return prune_snapshots(opts[:prune]) if opts.key?(:prune)
+      return reset_ledger if opts[:reset_ledger]
 
       configure_model!(@cli_model)
       opts[:resume] ? resume(opts[:resume]) : triage
@@ -95,6 +96,7 @@ module NexoMail
         o.on("--check", "Preflight only: which model + services are ready") { opts[:check] = true }
         o.on("--resume [RUN_ID]", "Resume a suspended run (default: the most recent one)") { |v| opts[:resume] = v || :last }
         o.on("--prune-snapshots [KEEP]", Integer, "Delete old run snapshots, keeping the newest KEEP (default #{Config.snapshots_keep})") { |v| opts[:prune] = v }
+        o.on("--reset-ledger", "Forget which mail was already triaged; the next run reads every inbox in full") { opts[:reset_ledger] = true }
         o.on("-h", "--help", "Show help and how to configure everything") { print_help }
       end.parse!(argv)
       opts
@@ -399,6 +401,22 @@ module NexoMail
       "#{ok.render("✓")} #{label} #{dim.render(found[:path])}"
     end
 
+    # ---- --reset-ledger -----------------------------------------------------
+
+    # Plain file bookkeeping, no model: drop every inbox's ledger so the next run is
+    # a full read. The extraction history goes with it — that is the point, e.g.
+    # after changing a triage skill, when old items should be judged again.
+    def reset_ledger
+      puts header.render("Nexo Mail Agent — ledger")
+      puts "  #{dim.render("dir: #{Ledger.dir}")}"
+      removed = Ledger.reset!
+      puts
+      puts "  #{brand.render("removed".ljust(9))} #{removed.empty? ? dim.render("none") : bad.render(removed.map { |p| File.basename(p, ".json") }.join(", "))}"
+      note "the next run reads every inbox in full"
+      puts
+      exit 0
+    end
+
     # ---- --prune-snapshots --------------------------------------------------
 
     # Pruning is agent-driven too: the Archivist decides the calls, the bounded
@@ -449,6 +467,7 @@ module NexoMail
       line "    --check               Preflight: which model + services are ready"
       line "    --resume [RUN_ID]     Continue a paused run (default: the most recent) without re-reading the inboxes"
       line "    --prune-snapshots [N] Prune run snapshots, keeping the newest N (default #{Config.snapshots_keep})"
+      line "    --reset-ledger        Forget which mail was already triaged (next run is a full read)"
       line "-h, --help                This help"
 
       section "CONFIG — #{Config.config_file}"

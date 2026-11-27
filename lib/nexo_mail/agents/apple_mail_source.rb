@@ -25,6 +25,9 @@ module NexoMail
           args: ["-c", 'exec "$0" 2>/dev/null', Config.apple_mail_mcp_command]
       end
 
+      LEDGER = "apple-mail"
+      LISTING_TOOLS = %w[get_emails search].freeze
+
       def self.prompt_key = "apple_mail"
 
       def self.availability
@@ -42,7 +45,11 @@ module NexoMail
       # Nexo::Agent#wrap_mcp_tool is the published hook for this: it is handed each
       # MCP tool AFTER the permission gate has wrapped it, so the cap only ever sees
       # an already-permitted call.
+      #
+      # The two LISTING tools are first filtered against the ledger, so mail an
+      # earlier run triaged is not listed again — the server itself has no cursor.
       def wrap_mcp_tool(tool)
+        tool = Tools::UnseenOnly.new(tool: tool, ledger: Ledger.for(LEDGER)) if LISTING_TOOLS.include?(tool.name.to_s)
         Tools::CappedTool.new(tool: tool, max_chars: Config.apple_body_chars)
       end
     end

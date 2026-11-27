@@ -36,6 +36,10 @@ module NexoMail
         anything older — you decide how far back the briefing reaches; this tool does
         not know what today is.
 
+        Returns only postings an earlier run has NOT already triaged, plus any whose
+        thread has had new activity since; `already_triaged` counts what was left out.
+        An empty box means nothing new arrived there.
+
         Every posting carries a `snippet` (~200 characters of the message). Classify
         from it, and read amounts straight out of it when it shows one. Only reach for
         the thread tool for the few messages the snippet genuinely cannot settle.
@@ -44,6 +48,8 @@ module NexoMail
         thread tool reads; `id` is only for de-duplication. A posting with no
         `thread_id` has no readable body — classify it from the snippet alone.
       DESC
+
+      LEDGER = "hey"
 
       parameters do
         array :boxes, description: 'Which boxes to list: any of "imbox", "feed", "papertrail", "setaside". Omit for all four.', required: false do
@@ -90,11 +96,13 @@ module NexoMail
         return nil unless postings.is_a?(Array)
 
         chars = (snippet_chars || Config.hey_snippet_chars).to_i.clamp(0, 1_000)
-        rows = postings.select { |p| cutoff.nil? || recent?(p, cutoff) }
-          .map { |p| Hey.project(p, snippet_chars: chars) }
+        recent = postings.select { |p| cutoff.nil? || recent?(p, cutoff) }
+        # A posting is new again when its thread moved: `active_at` is the stamp.
+        fresh = Ledger.for(LEDGER).take(recent) { |p| [p["id"], p["active_at"] || p["created_at"]] }
+        rows = fresh.map { |p| Hey.project(p, snippet_chars: chars) }
           .sort_by { |p| p[:date].to_s }.reverse
 
-        {box: box, label: Hey.label(box), count: rows.size, postings: rows}
+        {box: box, label: Hey.label(box), count: rows.size, already_triaged: recent.size - fresh.size, postings: rows}
       end
 
       def error_result(box, data)

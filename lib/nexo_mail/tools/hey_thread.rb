@@ -2,9 +2,9 @@
 
 module NexoMail
   module Tools
-    # Reads HEY message bodies by TOPIC id via `hey threads <id> --json`. Read-only.
+    # Reads HEY message bodies by TOPIC id via `hey thread read <id> --json`. Read-only.
     #
-    # Takes a LIST of ids and reads them all in one call. `hey threads` itself accepts
+    # Takes a LIST of ids and reads them all in one call. `hey thread read` itself accepts
     # exactly one id, so the loop lives here — which is the point: the model can only
     # issue tool calls sequentially, so fifteen bodies used to mean fifteen round trips
     # through the model. Now it means one.
@@ -47,7 +47,7 @@ module NexoMail
 
         chars = (max_chars || Config.hey_body_chars).to_i.clamp(200, 20_000)
         payloads = Pool.map(ids, size: Config.hey_concurrency) do |id|
-          Hey.run("threads", id.to_s, "--json")
+          Hey.run("thread", "read", id.to_s, "--json")
         end
 
         threads, truncated = bound(ids.zip(payloads).map { |id, data| thread(id, data, chars) })
@@ -78,9 +78,9 @@ module NexoMail
       # `hey` reports its own failures as an { "ok" => false, "error" => ... } envelope
       # on stdout; CliReader wraps process-level failures as { error: }. Surface either.
       def error_for(data)
-        return "unexpected `hey threads` payload" unless data.is_a?(Hash)
+        return "unexpected `hey thread read` payload" unless data.is_a?(Hash)
 
-        data[:error] || data["error"] || "unexpected `hey threads` payload"
+        data[:error] || data["error"] || "unexpected `hey thread read` payload"
       end
 
       # Last line of defence on total size: keep whole threads until the budget is

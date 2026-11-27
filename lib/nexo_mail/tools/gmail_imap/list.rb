@@ -22,11 +22,16 @@ module NexoMail
           Pass `since` (an ISO date) to bound how far back it reaches — you decide
           that; this tool does not know what today is.
 
+          Returns only mail an earlier run has NOT already triaged; `already_triaged`
+          counts what was left out. An empty list means nothing new arrived.
+
           ONE call returns everything you need to classify the whole inbox. Classify
           from the snippet. Do NOT call the read tool for a message the snippet already
           settles — reach for it only when you must read an exact amount or time the
           snippet cut off, and then batch every such uid into a single read call.
         DESC
+
+        LEDGER = "gmail"
 
         parameter :only_unread, type: :boolean, required: false, description: "Only unread messages (default true)"
         parameter :limit, type: :integer, required: false, description: "Max messages, newest first (default 40)"
@@ -42,12 +47,22 @@ module NexoMail
           chars = (snippet_chars || Config.gmail_snippet_chars).to_i.clamp(0, 2_000)
 
           result = GmailImap.with_inbox do |imap|
-            uids = imap.uid_search(criteria(only_unread, since)).last(max)
-            next {messages: [], count: 0} if uids.empty?
+            # Filtered BEFORE the fetch, so a message an earlier run triaged costs
+            # nothing — not its envelope, not its snippet. UIDs only mean something
+            # under the mailbox's UIDVALIDITY, so the ledger is told which one.
+            ledger = Ledger.for(LEDGER)
+            ledger.scope!(imap.responses["UIDVALIDITY"]&.last)
+            found = imap.uid_search(criteria(only_unread, since))
+            unseen = found.select { |uid| ledger.fresh?(uid) }
+            # Only what is actually returned is offered: anything past `max` stays
+            # unseen and comes back on the next run instead of being skipped for good.
+            uids = ledger.take(unseen.last(max)) { |uid| uid }
+            triaged = found.size - unseen.size
+            next {messages: [], count: 0, already_triaged: triaged} if uids.empty?
 
             rows = envelopes(imap, uids)
             attach_snippets(imap, rows, chars) if chars.positive?
-            {messages: rows.values.reverse, count: rows.size} # newest first
+            {messages: rows.values.reverse, count: rows.size, already_triaged: triaged} # newest first
           end
           JSON.generate(result)
         end

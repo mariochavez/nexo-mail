@@ -76,8 +76,9 @@ all archived to a timestamped snapshot.
 ```
    ┌── AppleMailSource (MCP) ──┐
    ├── EmailSource · Gmail ────┤   1. EXTRACT (parallel)   → apple-mail.json
-   └── EmailSource · HEY ──────┘      each writes a JSON      gmail.json · hey.json
-                                     array of items
+   └── EmailSource · HEY ──────┘      each reads only NEW     gmail.json · hey.json
+                                     mail (Ledger), then
+                                     commits the merge
                     │
               Synthesize          2. BUILD THE DIGEST   → digest.json
                                     merge · dedupe ·       + inbox-digest.md

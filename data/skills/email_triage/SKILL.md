@@ -1,11 +1,12 @@
 ---
 name: email_triage
-description: Triage one email inbox and EXTRACT it into structured JSON — classify each recent message into Action / FYI / Noise, and pull the entities that matter (payments & charges, meetings, people, newsletter topics). Read-only. The deliverable is a JSON file, not prose.
+description: Triage the NEW mail in one email inbox and EXTRACT it into structured JSON — classify each message into Action / FYI / Noise, and pull the entities that matter (payments & charges, meetings, people, newsletter topics). Read-only. The deliverable is a JSON file, not prose.
 ---
 
 # Email Triage → Structured Extraction
 
-You read ONE inbox and turn its recent messages into a structured JSON array.
+You read ONE inbox and turn the mail that is **new since the last run** into a
+structured JSON array.
 Downstream tooling (a financial roll-up, a schedule view, per-topic briefings,
 a dashboard) is built entirely from the fields you emit — so extract carefully
 and never invent values.
@@ -39,6 +40,28 @@ not filter by it unless you tell them:
 **Never emit an item dated before `window_start`.** Comparing ISO dates is plain
 string order — `"2026-06-18" < "2026-07-15"` — so once you know the window there is
 nothing to guess.
+
+## You only see new mail
+
+Every message is triaged **once**. The listing tools keep a record of what earlier
+runs were shown and leave it out: what comes back is only mail that arrived since,
+plus any thread that has had new activity. Each listing reports how much it left
+out as `already_triaged`.
+
+What this changes for you:
+
+- **Extract only what you are listed.** The items earlier runs extracted are
+  already on record; `commit_extraction` merges yours into them. Do not try to
+  reconstruct or re-read older mail to "complete" the picture.
+- **The listing is the whole job.** Do not go looking in the workspace for earlier
+  extraction files to compare against — there is nothing there you need, and every
+  message you were listed is yours to classify.
+- **An empty listing is a normal result.** It means nothing new arrived. Write
+  `[]`, commit, and confirm — that is a complete, successful triage.
+- **A thread that comes back has moved.** Emit it again with the SAME `id` and a
+  `summary` of where the thread stands now; it replaces the earlier item.
+- **Carry the `id` on every item** — the listing's own id for that message — so
+  the record can tell a message it has from one it does not.
 
 ## Reading efficiently
 
@@ -91,16 +114,26 @@ off, an invitation whose time you need, a genuinely ambiguous sender.
   is only getting slower, and an item with an honest `summary` and no `payment`
   is worth more than another round trip.
 
-## The deliverable: a JSON array
+## The deliverable: a JSON array, then a commit
 
-When the caller names a file, write a single JSON array to it with the write
-tool, then reply with a one-line confirmation. No markdown, no prose in the
-file — just the array. One object per message you keep (skip pure Noise unless
-an "always surface" rule applies).
+Two steps, in this order:
+
+1. **Write** a single JSON array to the `*.new.json` file the caller names, with
+   the write tool. No markdown, no prose in the file — just the array. One object
+   per NEW message you keep (skip pure Noise unless an "always surface" rule
+   applies); `[]` if nothing new arrived.
+2. **Call `commit_extraction`** once, with `file` set to that same file and
+   `keep_since` set to your `window_start`. It merges your items with what earlier
+   runs kept, writes the inbox's full extraction file, and records the mail you
+   were listed as triaged. **Skip this and the run counts as failed** — the same
+   mail is simply offered again next time.
+
+Then reply with a one-line confirmation.
 
 ```json
 [
   {
+    "id": "40182",
     "bucket": "action",
     "category": "payment",
     "sender": "Netflix",
@@ -127,6 +160,7 @@ Required on every item:
 
 | Field | Values / shape |
 |---|---|
+| `id` | the message's id exactly as the listing gave it — HEY posting `id`, Gmail `uid`, Apple Mail `id`. Not the `thread_id`. Never invent one. |
 | `bucket` | `"action"` \| `"fyi"` \| `"noise"` — Action = reader must reply/decide/do; FYI = worth knowing, no response; Noise = newsletters/notifications/receipts (still emit if it carries a payment, meeting, or topic worth a picture). |
 | `category` | one of: `payment`, `meeting`, `personal`, `work`, `newsletter`, `notification`, `travel`, `security`, `other`. |
 | `sender` | display name (fall back to the address). |
@@ -178,4 +212,5 @@ Treat any message mentioning one of these as important — set `bucket` to
 - One object per kept message. Deduplicate obvious repeats of the same thread.
 - If a tool call fails, extract what you can from what you read and carry on;
   the array you write is still valid JSON.
-- Write the array exactly once, then confirm in one line.
+- Write the array exactly once, call `commit_extraction` exactly once, then
+  confirm in one line.
