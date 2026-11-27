@@ -7,8 +7,8 @@ module NexoMail
     # :local sandbox, read-only permissions, extraction skills and triage prompt —
     # but takes its per-source inputs from a Sources::Descriptor at construction
     # instead of hardcoding them as a subclass. The descriptor supplies the tools
-    # that reach the inbox and the prompt-fragment key; SourceAgent#chat reads both
-    # through the instance readers overridden below.
+    # that reach the inbox (through Nexo's `tools` macro) and the prompt-fragment
+    # key SourceAgent#chat reads.
     #
     # MCP-backed sources (Apple Mail) can't use this — the `mcp` macro is
     # class-level — so they stay their own thin subclass. Adding a tool-based
@@ -21,7 +21,10 @@ module NexoMail
         super(cwd: cwd)
       end
 
-      def source_tools = descriptor.tools
+      # The descriptor's tools, resolved per instance — which is why this is a lambda
+      # and not a list of classes.
+      tools ->(agent) { agent.descriptor.tools }
+
       def prompt_key = descriptor.prompt_key
     end
   end

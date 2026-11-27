@@ -106,7 +106,7 @@ module NexoMail
     # container). The Publisher is the only agent holding :shell and it reaches no
     # mail, so it is the one stage that can be isolated at no cost to the pipeline.
     # An unknown value is an explicit error, never a silent fall back to the host.
-    DASHBOARD_SANDBOXES = %w[local docker apple].freeze
+    DASHBOARD_SANDBOXES = %w[local confined docker apple].freeze
 
     def dashboard_sandbox
       value = val("NEXO_MAIL_DASHBOARD_SANDBOX", data.dig("dashboard", "sandbox"), "local").to_s.strip.downcase
@@ -116,7 +116,19 @@ module NexoMail
         "[dashboard] sandbox must be one of #{DASHBOARD_SANDBOXES.join(", ")} (got #{value.inspect})"
     end
 
-    def dashboard_containerized? = dashboard_sandbox != "local"
+    def dashboard_containerized? = %w[docker apple].include?(dashboard_sandbox)
+
+    # The install prefix of the interpreter `[dashboard] ruby` names, for a confined
+    # shell to be allowed to read (see Agents::Publisher.confined_sandbox). Found by
+    # walking PATH and resolving shims and symlinks; nil when it cannot be found, in
+    # which case the confined render fails loudly rather than guessing.
+    def dashboard_ruby_prefix
+      ruby = dashboard_ruby
+      path = ruby.include?("/") ? ruby : ENV["PATH"].to_s.split(File::PATH_SEPARATOR).map { |dir| File.join(dir, ruby) }.find { |candidate| File.executable?(candidate) }
+      path && File.expand_path("..", File.dirname(File.realpath(path)))
+    rescue SystemCallError
+      nil
+    end
 
     # The image the containerized Publisher runs in. It needs nothing but a Ruby
     # interpreter — the render script is pure stdlib — so any ruby:* tag works.

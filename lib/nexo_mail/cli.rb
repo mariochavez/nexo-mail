@@ -68,10 +68,8 @@ module NexoMail
         c.public_send(base_setter, model.api_base) if c.respond_to?(base_setter) && !model.api_base.to_s.empty?
         c.public_send(key_setter, model.api_key) if c.respond_to?(key_setter) && !model.api_key.to_s.empty?
       end
-      # Tool concurrency goes through NEXO's setting (nexo_ai >= 0.8.1), which applies
-      # it to each chat AFTER the tools are attached — every `with_tools` call resets a
-      # chat's concurrency, so setting it globally on RubyLLM first is silently undone
-      # by Nexo's own tool wiring.
+      # Tool concurrency goes through NEXO's setting, which applies it to each chat it
+      # builds (ruby_llm's own `with_tool_options`).
       Nexo.configure do |c|
         c.skills_path = Config.skills_dir
         c.tool_concurrency = Config.tool_concurrency
@@ -80,6 +78,9 @@ module NexoMail
         # from the run store, and Nexo's default one is in-memory. One line makes
         # `--resume` possible at all.
         c.run_store = Nexo::RunStore::Disk.new(dir: Config.runs_dir)
+        # Every tool an agent can call is one Nexo attached or one declared with
+        # the `tools` macro. Anything else is refused rather than run ungated.
+        c.strict_tools = true
       end
       Nexo.config.default_model = model.model
       Agents::SourceAgent.configure_model!(model)

@@ -347,8 +347,12 @@ XSS-safe, and restyling means editing the template — never the app's Ruby.
   also gets `:shell`, purely to run the render script — it attaches no mail tools and
   reads only the already-produced `digest.json`. Every mail-reading agent stays
   `:read_only` with no shell (`AppleMailSource.permissions.authorize!(:shell)` raises;
-  the Publisher's does not). `[dashboard] sandbox = "docker"` moves that shell off the
-  host entirely, into a network-less container.
+  the Publisher's does not). `[dashboard] sandbox = "confined"` fences that shell with
+  an OS sandbox over the same workspace; `"docker"` moves it off the host entirely,
+  into a network-less container.
+- **Declared tools only.** Host tools are attached through Nexo's `tools` macro and
+  the CLI sets `Nexo.config.strict_tools`, so a tool nobody declared is refused rather
+  than run ungated. `ArchiveRun`/`PruneSnapshots` carry `capability: :write`.
 - **Bounded destructive tools.** `PruneSnapshots` deletes only inside the snapshots
   dir; the agent decides *to* prune, the tool does the deletion deterministically.
 - **De-dup, twice.** Cross-source (the same email in two inboxes) and cross-group

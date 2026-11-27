@@ -10,7 +10,11 @@ module NexoMail
       # Reset inherited extraction skills — the archivist only manages snapshots.
       @skills = %i[snapshot_keeper]
 
-      def self.source_tools = [Tools::ArchiveRun, Tools::PruneSnapshots]
+      # Both tools change files on the host (the snapshots directory), so they are
+      # declared as :write. Nexo's permission gate then decides every call, exactly as
+      # it does for its own write tool: allowed here because this agent's permissions
+      # grant :write, refused for any agent whose permissions do not.
+      tools Tools::ArchiveRun, Tools::PruneSnapshots, capability: :write
       def self.prompt_key = "archivist"
 
       instructions <<~TXT

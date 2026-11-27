@@ -34,25 +34,20 @@ module NexoMail
         end
       end
 
-      # Plain (non-MCP) RubyLLM tool classes to attach for this source; MCP-backed
-      # sources leave this empty and use the `mcp` macro instead.
-      def self.source_tools = []
-
-      # Attached to EVERY agent, on top of whatever the source declares. A model has
-      # no notion of today, and that is not a stylistic problem: a run generated on
-      # 2026-08-20 produced a schedule of 2026-06-18 / 2026-07-17 / 2026-07-23 —
-      # every appointment already past — and counted June charges as current.
-      def self.common_tools = [Tools::Today]
+      # Attached to EVERY agent, on top of whatever a subclass declares with `tools`.
+      # A model has no notion of today, and that is not a stylistic problem: a run
+      # generated on 2026-08-20 produced a schedule of 2026-06-18 / 2026-07-17 /
+      # 2026-07-23 — every appointment already past — and counted June charges as
+      # current. Declared through Nexo's macro so Nexo knows the tool: under
+      # strict_tools (see CLI) a tool it did not attach is refused.
+      tools Tools::Today
 
       # The prompt-fragment key (<prompts_dir>/<key>.md) appended to this agent's
       # instructions. nil on the base; concrete sources override.
       def self.prompt_key = nil
 
-      # Instance-level views of the two per-source inputs #chat wires. They default
-      # to the class macros (so AppleMailSource/Synthesize/Publisher/Archivist keep
-      # their class-level declarations), but EmailSource overrides them to read a
-      # per-instance descriptor — that's how one class serves many tool-based sources.
-      def source_tools = self.class.source_tools
+      # Instance-level view of the prompt key #chat wires. Defaults to the class
+      # macro; EmailSource overrides it to read a per-instance descriptor.
       def prompt_key = self.class.prompt_key
 
       # Preflight availability check. Returns nil when the source can run, or a short
@@ -68,13 +63,10 @@ module NexoMail
         end
       end
 
-      # Attach the source's tools and append user prompt fragments on top of Nexo's
-      # normal wiring (super applies instructions + skill; with_tools/with_instructions
-      # are additive). A `common` fragment applies to every agent, plus a per-agent one.
+      # Append user prompt fragments on top of Nexo's normal wiring (with_instructions
+      # is additive). A `common` fragment applies to every agent, plus a per-agent one.
       def chat(base: nil)
         chat = super
-        tools = (source_tools + self.class.common_tools).uniq.map(&:new)
-        chat.with_tools(*tools) unless tools.empty?
         [Config.prompt_fragment("common"), Config.prompt_fragment(prompt_key)]
           .compact.each { |fragment| chat.with_instructions(fragment, append: true) }
         chat
