@@ -24,6 +24,7 @@ exe/nexo-triage --check              # preflight: model + services readiness
 exe/nexo-triage --help               # config + per-service setup docs
 exe/nexo-triage                      # run a triage (needs a model + services)
 exe/nexo-triage --prune-snapshots 20 # agent-driven prune, keep newest 20
+exe/nexo-triage --reset-ledger       # forget what was triaged; next run is a full read
 RUBYLLM_WIRE=1 exe/nexo-triage       # show raw ruby_llm/MCP logs
 gem build nexo_mail.gemspec           # package (data/** must be included)
 bundle exec standardrb lib            # lint (Standard); --fix to autofix
@@ -46,6 +47,7 @@ lib/nexo_mail/
   theme.rb                  # Catppuccin palettes (lipgloss) + Glamour styles
   cli.rb                    # NexoMail::CLI — the runner (OptionParser + UI, thin)
   snapshots.rb              # NexoMail::Snapshots — create/list/prune (used by tools)
+  ledger.rb                 # NexoMail::Ledger — what each inbox already triaged (used by tools)
   sources.rb                # NexoMail::Sources — the source catalog (descriptors)
   agents/                   # SourceAgent base + EmailSource (data-driven, tool-based
                             #   Gmail/HEY) + AppleMailSource (MCP), Synthesize (digest),
@@ -53,7 +55,8 @@ lib/nexo_mail/
   tools/                    # CliReader, Pool, Hey/HeyBox/HeyThread, CappedTool,
                             #   Today, SumPayments (deterministic primitives),
                             #   GmailImap(::List/::Read/::Mime/::BodyPart),
-                            #   ArchiveRun, PruneSnapshots
+                            #   ArchiveRun, PruneSnapshots, CommitExtraction (ledger merge),
+                            #   UnseenOnly (ledger filter around an MCP listing)
   workflows/                # MultiInboxTriage < Nexo::Workflow (orchestration only)
 data/                       # PACKAGED: config.example.toml, skills/, themes/, prompts/
   skills/                   # email_triage, financial_summary, interest_radar (extract),
@@ -64,8 +67,9 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
 
 ## Pipeline (agent + skills driven)
 
-1. **Source agents** (AppleMail/Gmail/HEY, parallel) extract each inbox → a
-   structured JSON array file (`gmail.json`, …). Skills: `email_triage`,
+1. **Source agents** (AppleMail/Gmail/HEY, parallel) extract the mail that is NEW
+   since the last run and commit it into a structured JSON array file
+   (`gmail.json`, …) holding the whole window. Skills: `email_triage`,
    `financial_summary`, `interest_radar`. The workflow walks `NexoMail::Sources.all`
    — one **descriptor** per source (name, file, `prompt_key`, tools, availability).
    Tool-based sources (Gmail, HEY) share ONE `Agents::EmailSource` built from a
@@ -248,7 +252,7 @@ parses no JSON, renders nothing.
   ARRAY and returns all of them in one call. An unknown name is an explicit error
   — never a silent fallback to the Imbox, which is how The Feed and Paper Trail
   went untriaged. Box *ids* are per-account; only the `kind` strings are stable.
-- **`hey threads` wants the TOPIC id, not the posting `id`.** The topic id lives
+- **`hey thread read` (hey CLI 1.7+; it was `hey threads` before, which now fails as an unknown command) wants the TOPIC id, not the posting `id`.** The topic id lives
   only inside `posting["app_url"]` (`https://app.hey.com/topics/<TOPIC_ID>`) and is
   a different number; reading by posting id always 404s. `Hey.thread_id` parses it,
   the listing exposes it as `thread_id`, and a `kind: "bundle"` posting (app_url
@@ -319,6 +323,35 @@ parses no JSON, renders nothing.
   inert. So a stage that legitimately needs more rounds must have its number raised —
   a second run on a sandbox that still holds the last run's files costs extra rounds,
   because the read-before-write guard makes the model re-read each file it overwrites.
+- **Every message is triaged ONCE — `NexoMail::Ledger` is the memory.** One JSON file
+  per source in `Config.ledger_dir` (state) holds `seen` (id → activity stamp, for
+  every message a committed run was SHOWN, noise included) and `items` (id → the
+  extraction item). The listing tools filter against `seen` — `GmailImap::List` before
+  the fetch (ids scoped by UIDVALIDITY), `HeyBox` by posting id + `active_at` (so a
+  thread that moved comes back), Apple Mail through the `Tools::UnseenOnly` wrapper
+  around the MCP `get_emails`/`search` (the server has no cursor; an unparseable
+  reply passes through untouched). The agent writes only the NEW items to
+  `<source>.new.json` and calls `Tools::CommitExtraction`, which upserts by `id`,
+  writes the full `<source>.json` Synthesize reads, and is the ONLY thing that moves
+  the cursor. **Listing remembers what it offered in memory only; commit persists
+  it** — so a run that dies in between marks nothing read. That is why ledgers are
+  process-wide (`Ledger.for(key)`): the listing tool and the commit tool are
+  different objects sharing one offered set. The workflow's success test for a source
+  is `Ledger#committed?`, NOT the file — `<source>.json` survives from the previous
+  run. Ruby still holds no date policy: the agent passes its window as `keep_since`.
+  Measured on two back-to-back runs with nothing new in between: reading the inboxes
+  went from 7m32s (HEY, 12 calls) + 2m27s (Apple Mail) to 7.3s + 6.5s, each agent
+  listing zero messages, writing `[]` and committing. `--reset-ledger` forgets
+  everything (use it after changing a triage skill, when old items should be judged
+  again). The cost that remains is Synthesize, which still rebuilds the whole digest
+  from every item on every run (9m09s and all 20 of its rounds on a 212-item seed).
+  Two traps this exposed: (1) **the workflow deletes `<source>.json` before the source
+  agent runs** (`CommitExtraction.clear`) — left in place, an agent reads the previous
+  run's copy, takes it for "what is already on record", and trims its output to match
+  (48 listed, 7 committed); before the ledger that same re-read was an accidental
+  memory, which is how Apple Mail showed 45 items from an inbox holding 11 in window.
+  (2) the file is written **one item per line**, not pretty-printed — the read tool
+  is line-windowed and 204 pretty items were 2,927 lines.
 - **Snapshots live in `Config.snapshots_dir`** (state), separate from the sandbox.
   Because the sandbox is fenced, agents reach snapshots ONLY via the `ArchiveRun` /
   `PruneSnapshots` tools. Each run archives `digest.json` + `dashboard.html` +

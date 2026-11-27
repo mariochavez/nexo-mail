@@ -58,6 +58,14 @@ flavor = "mocha"
 # runs_dir  = "${XDG_STATE_HOME:-~/.local/state}/nexo-mail/runs"
 # runs_keep = 20
 
+# ── Ledger ──────────────────────────────────────────────────────────────────
+# Each inbox keeps a ledger of the mail it has already triaged, so a run reads and
+# classifies only what arrived since the last one (and any thread that has moved),
+# then merges it into what was extracted before. A run that dies before it commits
+# leaves the ledger untouched, so nothing is skipped — the mail is offered again.
+# `nexo-triage --reset-ledger` forgets it all and makes the next run a full re-read.
+# ledger_dir = "${XDG_STATE_HOME:-~/.local/state}/nexo-mail/ledger"
+
 # ── Dashboard ───────────────────────────────────────────────────────────────
 # The Publisher renders dashboard.html from a template + a render script. Both are
 # AUTO-RESOLVED from the skill the Publisher declares — ruby_llm-skills finds that

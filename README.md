@@ -68,6 +68,7 @@ indexing, the Gmail App Password steps, building the `hey` CLI).
 nexo-triage                 # triage all configured sources → digest
 nexo-triage --check         # preflight: which model + services are ready
 nexo-triage --resume        # continue a paused run without re-reading the inboxes
+nexo-triage --reset-ledger  # forget which mail was triaged; the next run reads everything
 nexo-triage --model cloud   # pick a configured model by alias
 nexo-triage --theme latte   # override the theme for this run
 RUBYLLM_WIRE=1 nexo-triage   # show the raw ruby_llm/MCP logs
@@ -82,6 +83,12 @@ Each agent **declares** what it produces, so the run itself carries the delivera
 (`digest.json`, `inbox-digest.md`, `dashboard.html`, the per-source extractions) —
 not just the directory they happened to land in. The last line of a run tells you
 what was recorded.
+
+Each message is triaged **once**. Every inbox keeps a ledger under
+`$XDG_STATE_HOME/nexo-mail/ledger`, so a run reads and classifies only the mail that
+arrived since the last one — plus any thread that has moved — and merges it into
+what was extracted before. A run that dies before it commits marks nothing as read.
+`--reset-ledger` starts over.
 
 A run that reads every inbox and then fails to build the digest **pauses** rather
 than dying: the extraction is checkpointed, so `--resume` picks up at synthesis

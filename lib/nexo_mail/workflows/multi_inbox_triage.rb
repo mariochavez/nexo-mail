@@ -69,18 +69,25 @@ module NexoMail
         file = descriptor.file
         emit(:source_started, source: name, file: file)
         agent = descriptor.build(cwd: Config.sandbox_dir)
+        inbox = Ledger.inbox_file(file)
+        Tools::CommitExtraction.clear(file)
         agent.prompt(
-          "Triage this inbox per the skills, then write the JSON array of items to " \
-          "the file `#{file}` in the workspace.",
+          "Triage the mail that is new in this inbox per the skills. Write the JSON " \
+          "array of the items you extracted to `#{inbox}` in the workspace (`[]` if " \
+          "nothing new arrived), then call commit_extraction with that file: it merges " \
+          "them with what earlier runs kept and writes `#{file}`.",
           max_turns: 30
         ) { |type, payload| forward_event(name, type, payload) }
 
-        if File.exist?(File.join(Config.sandbox_dir, file))
+        # The commit, not the file: `file` survives in the workspace from the run
+        # before, so its existence proves nothing about this one. An uncommitted
+        # source drops out, and its mail is offered again next run.
+        if Ledger.for_file(file).committed?
           record_artifact(file)
           emit(:source_done, source: name, ms: ms_since(started))
           file
         else
-          emit(:source_failed, source: name, error: "no extraction file written", ms: ms_since(started))
+          emit(:source_failed, source: name, error: "extraction was not committed to the ledger", ms: ms_since(started))
           nil
         end
       rescue => e
