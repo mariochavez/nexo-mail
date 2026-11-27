@@ -1,6 +1,6 @@
 ---
 name: dashboard_designer
-description: Produce the HTML dashboard for a triage run by RUNNING this skill's bundled render script over digest.json. The design is a fixed, versioned template ("Inbox Briefing" — a calm, modern, glanceable dashboard) rendered deterministically, so every run looks identical and is XSS-safe. Do not hand-write HTML.
+description: Produce the HTML dashboard for a triage run by RUNNING this skill's bundled render script over digest.json. The design is a fixed, versioned template ("Inbox Briefing" — a reading column with a glanceable side rail) rendered deterministically, so every run looks identical and is XSS-safe. Do not hand-write HTML.
 compatibility: Needs a Ruby 3.0+ interpreter reachable from the sandbox shell, and the shell tool to run it. Without those, say so and stop — there is no fallback and hand-authored HTML is not one.
 ---
 
@@ -37,24 +37,35 @@ and stop.
 You don't build this — but this is what `dashboard-template.html` renders, so a
 maintainer editing the template keeps the intent:
 
-- **Calm, modern, glanceable.** Light default + a real dark mode (system fonts,
-  soft grey ground, white cards, gentle rounded corners, generous whitespace).
-  One friendly blue accent; four soft category tints (blue = needs you, amber =
-  money, green = schedule, purple = radar); semantic red/amber/green only for
-  money & urgency, always paired with a label.
-- **Top-down priority (inverted pyramid):** a top bar (wordmark, date, source
-  chips) → a hero with a warm one-line headline and a **Needs-you to-do
-  checklist** (check items off; the count ticks down) → **soft-tinted stat
-  cards** (Need you / Money due / On the calendar / Radar) → prioritized sections:
-  Money (due/charged/paid + a bar list + subscriptions), Schedule (agenda with
-  RSVP/Set pills), Radar (topics as **2–3 tight bullets**, expandable), People
-  (full notes), Threads (story arcs), Also worth knowing (FYI, collapsed).
+- **Built for reading, not for filling a grid.** Light default + a real dark mode
+  (system fonts, soft grey ground, white cards). One blue accent; category tints
+  (blue = needs you, amber = money, green = schedule, purple = radar); red/amber/green
+  only for urgency and money, always paired with a label.
+- **No box may leave a hole.** The earlier design paired cards in a two-column grid,
+  so a short card beside a tall one left a large blank area. The layout is now:
+  - a **masthead**: the headline as one readable paragraph (not a giant heading),
+    with the date and sources;
+  - a **sticky bar**: section links that carry the counts (18 need you · $ due ·
+    1 event · …) and the search field (`/` focuses it);
+  - a **reading column** — Needs you (a checklist, six shown, the rest behind
+    "Show more"), Radar and Threads (short cards in CSS *columns*, a masonry, so
+    uneven heights pack instead of leaving gaps), Also worth knowing (a dense
+    sender / subject / age list);
+  - a **side rail** that stays in view — Schedule, Money, People — for the things
+    you glance at rather than read. Below 920px it becomes one column.
+- **Short by default, complete on demand.** A radar topic shows three bullets, a
+  thread four lines, a person three; each expands in place. Searching reveals
+  everything that matches, including collapsed content.
+- **Checked items stay checked.** To-dos are remembered per briefing in
+  `localStorage`, keyed by the run's timestamp.
+- **Dates are calendar days.** A date-only value (`2026-12-14`) is parsed as a local
+  day; parsed as UTC it rendered as the day before.
 - **Safe by construction:** every dynamic string reaches the DOM only via
   `textContent`; the data blob is escaped by the render script; links are
   `^https?://`-checked. Fully self-contained (no CDN/web fonts), opens from
   `file://`.
-- **Calm interactions:** check off to-dos, stat cards jump to their section,
-  live search, expand/collapse (View all / Read briefing / Show more).
+- **Calm interactions:** check off to-dos, jump from the sticky bar, live search,
+  expand and collapse in place. It prints with everything expanded.
 
 To evolve the look, edit `assets/dashboard-template.html` (and the escaping in
 `scripts/render_dashboard.rb` if you touch the data blob) — never by asking the
