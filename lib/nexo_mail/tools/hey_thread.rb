@@ -46,9 +46,7 @@ module NexoMail
         ids = ids.first(cap)
 
         chars = (max_chars || Config.hey_body_chars).to_i.clamp(200, 20_000)
-        payloads = Pool.map(ids, size: Config.hey_concurrency) do |id|
-          Hey.run("thread", "read", id.to_s, "--json")
-        end
+        payloads = ids.map { |id| Hey.run("thread", "read", id.to_s, "--json") }
 
         threads, truncated = bound(ids.zip(payloads).map { |id, data| thread(id, data, chars) })
         JSON.generate({threads: threads, skipped: skipped, truncated: truncated}.reject { |_, v| v == [] || v == false })

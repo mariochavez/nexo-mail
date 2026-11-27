@@ -354,7 +354,7 @@ Docs to reach for by topic (paths relative to the repo/gem root):
 |---|---|
 | Sandboxes (Virtual/Local/Remote/Container) | `docs/sandboxes.md` |
 | Permissions modes and the `:ask`/`:approve` gates | `docs/permissions.md` |
-| Built-in tools (ReadFile/WriteFile/Shell/Glob) | `docs/tools.md` |
+| Built-in tools (read_file/list_files/search_files/write_file/edit_file, Shell) | `docs/tools.md` |
 | The loop, `max_turns` as a hard cap | `docs/loops.md` |
 | Workflow lifecycle, staging, artifacts | `docs/workflows.md` |
 | Checkpoint/suspend/resume durability | `docs/durable-workflows.md` |

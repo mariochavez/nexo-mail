@@ -56,7 +56,7 @@ lib/nexo_mail/
   agents/                   # SourceAgent base + EmailSource (data-driven, tool-based
                             #   Gmail/HEY) + AppleMailSource (MCP), Synthesize (digest),
                             #   Publisher (dashboard), Archivist
-  tools/                    # CliReader, Pool, Hey/HeyBox/HeyThread, CappedTool,
+  tools/                    # CliReader, Hey/HeyBox/HeyThread, McpWrapper (CappedTool, UnseenOnly),
                             #   Today, MoneyReport (deterministic primitives),
                             #   GmailImap(::List/::Read/::Mime/::BodyPart),
                             #   ArchiveRun, PruneSnapshots, CommitExtraction (ledger merge),
@@ -90,7 +90,7 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
 3. **Publisher** renders `dashboard.html` by RUNNING the `dashboard_designer`
    skill's bundled `scripts/render_dashboard.rb` over `assets/dashboard-template.html`
    + `digest.json` (the workflow STAGES the skill's `scripts/`+`assets/` into the
-   sandbox first, so the agent's gated read/glob tools can reach them). The design is
+   sandbox first, so the agent's gated file tools can reach them). The design is
    a fixed, versioned template rendered deterministically — the model does NOT author
    HTML. Editing the look = editing the template, not the skill prose.
 4. **Archivist** archives the run + prunes old snapshots via the `ArchiveRun` /
@@ -111,9 +111,9 @@ parses no JSON, renders nothing.
   accessor + a `NEXO_MAIL_*` name + a line in `data/config.example.toml`.
 - **Models**: no default. `Config.active_model(cli_alias)` picks `--model`, else
   `NEXO_MAIL_MODEL`, else the first `[[models]]`. One model runs per invocation, so
-  the CLI mutates `RubyLLM.configure` globally and calls
-  `Agents::Base.configure_model!(m)` (sets provider/model on every agent
-  class) — do NOT reach for `RubyLLM.context`.
+  the CLI mutates `RubyLLM.configure` globally and sets `NexoMail.active_model`,
+  which `Agents::Base` reads lazily (`model`, `provider`, `assume_model_exists` are
+  reader overrides of Nexo's macros) — do NOT reach for `RubyLLM.context`.
 - **Skills** load from the XDG skills dir (`Config.skills_dir`), seeded copy-if-missing
   from `data/skills/`. Editing the XDG copy is the override. `nexo`'s `skills_path`
   is a single dir with no built-in precedence — that's why we seed. New skill dir →
@@ -165,9 +165,14 @@ parses no JSON, renders nothing.
   a checkpoint. `extract_source` must NEVER raise: a raising step fails the run and
   stops the other sources. A failed source checkpoints as `nil` and is not retried.
   Each checkpoint stores that source's filename, not the mail — the files
-  live in the workspace. `Workflow.resume` only accepts a `"suspended"` run, so a
-  `"failed"` one is NOT resumable; that is why the workflow suspends deliberately
-  instead of letting the stage swallow the error. Nexo never prunes run documents
+  live in the workspace. `--resume` handles three statuses: `suspended` goes to
+  `Workflow.resume`, `failed` and `interrupted` to `Workflow.retry` (nexo_ai 0.16),
+  after `reconcile_interrupted!` has marked a run a dead process left `"running"`.
+  The workflow still suspends deliberately on an uncommitted digest: a suspend
+  prints a hint, a raise prints a backtrace. Ctrl-C is caught in `CLI#drive`
+  (`#interrupted`) and is NOT `Workflow.cancel`: a cancelled run is final.
+  `--resume` picks the newest run by ID (UUIDv7), never by file time — the sweep
+  rewrites old run files. Nexo never prunes run documents
   (`CLI#trim_runs` keeps `Config.runs_keep`).
 - **The Publisher's shell is fenced by CONFIG, and the workspace is always shared.**
   `Agents::Publisher.sandbox` is a lazy READER override over `[dashboard] sandbox`
@@ -180,8 +185,10 @@ parses no JSON, renders nothing.
   UNSET, the value is `confined` where `Config.confinement_available?` and `local`
   otherwise; an explicit `confined` that cannot run raises at render time.
   `readable:` comes from `Config.dashboard_readable`: the directory of an absolute
-  `template`/`renderer` override, plus (confined only) `dashboard_ruby_prefix` —
-  without it ruby starts but cannot load its stdlib. `Config.dashboard_containerized?`
+  `template`/`renderer` override, plus (confined only) the interpreter's install —
+  Nexo's `:ruby` preset for the CLI's own Ruby (the default: `dashboard_ruby` is
+  `RbConfig.ruby`), or `dashboard_ruby_prefix` for a pinned `[dashboard] ruby`.
+  Without it ruby starts but cannot load its stdlib. `Config.dashboard_containerized?`
   is true ONLY for docker/apple and only decides `publisher_ruby` (the image's `ruby`
   vs the pinned host one). The sandbox dir must be shared with the container VM
   (the home directory is, on OrbStack/Docker Desktop). `hardening_gaps` is emitted.
@@ -191,16 +198,15 @@ parses no JSON, renders nothing.
   tool, and that there is no fallback. Subject to the SAME seed-once gotcha as the
   rest of the skill: editing `data/skills/*/SKILL.md` does not reach an existing
   install — `cp` it over `Config.skills_dir`.
-- **`Base.configure_model!` finds the agent classes itself** (loads every constant
-  under `Agents`, then walks `Base`'s subclasses). A new agent class needs no entry
-  anywhere — but it must inherit `Agents::Base`.
+- **A new agent class needs no entry anywhere** — but it must inherit `Agents::Base`,
+  which is where the model, sandbox and permissions come from.
 - **Host tools are declared with Nexo's `tools` macro (nexo_ai >= 0.14), never by
   calling `with_tools` in `#chat`.** `Base` declares `Tools::Today` for everyone;
   `Synthesize` adds `MoneyReport`; `EmailSource` adds a lambda reading its descriptor;
   `Archivist` declares `ArchiveRun`/`PruneSnapshots` with `capability: :write`, which
   wraps them in `Nexo::GatedTool` (allowed because the shared permissions grant
   `:write`). The mail-reading tools carry no capability — read-only by construction.
-  The CLI sets `Nexo.config.strict_tools = true`: a tool attached any other way is
+  `Nexo.config.strict_tools` is on by default (nexo_ai 0.16): a tool attached any other way is
   REFUSED ("did not run"), so a new tool that is not declared silently does nothing.
   The old `source_tools`/`common_tools` hooks are gone.
 - **Per-agent prompt fragments**: `SourceAgent#chat` appends `common.md` +
@@ -208,7 +214,11 @@ parses no JSON, renders nothing.
   `self.prompt_key`.
 - **Read-only by construction**: MCP fail-closed allow-list (Apple Mail), IMAP
   `EXAMINE` (Gmail), hardcoded CLI read subcommands via argv arrays (HEY). Agents run
-  a `:local` sandbox fenced to `Config.sandbox_dir` with only `:read/:glob/:write`.
+  a `:local` sandbox fenced to `Config.sandbox_dir` with only `:read` and `:write` (`:glob` is still in
+  the allow list and asks for nothing since nexo_ai 0.16). The file tools are
+  ruby_llm's: `read_file` (20,000 chars a page, a line past 2,000 is cut),
+  `list_files`, `search_files`, `write_file`, `edit_file`; a write to an existing
+  file needs a read of it first in the same chat.
   **One scoped exception:** the `Publisher` agent alone also gets `:shell`, purely to
   run the bundled dashboard render script — it reaches NO mail (no mail tools).
   **As of nexo_ai 0.11 the `allow:` list decides the SCHEMA, not just the gate.** Nexo
@@ -229,12 +239,12 @@ parses no JSON, renders nothing.
   needs no code change — verified by renaming both the skill dir and its files.
   A new script-bearing skill needs NO Config accessor.
   **Nexo deliberately does not attach the gem's `SkillTool`** (it does ungated
-  `File.read`), and `Sandboxes::Local` is SINGLE-ROOTED — every read/glob/write is
+  `File.read`), and `Sandboxes::Local` is SINGLE-ROOTED — every read and write is
   guarded against one `cwd` — so a skill's files are invisible to the gated tools
   while they live outside the sandbox.
 - **The workflow STAGES skill resources into the sandbox** (`stage_skill_resources`),
   copying every `scripts/`+`assets/` file the skill ships and preserving that layout,
-  so the render command is workspace-relative and the agent can `glob scripts/*`
+  so the render command is workspace-relative and the agent can list `scripts/`
   through its permission-gated tools. **Accepted tradeoff:** the Publisher holds
   `:write` AND `:shell`, so a staged script sits in space it could rewrite before
   executing — outside the sandbox it could not be touched at all. Mitigation: we
@@ -270,26 +280,18 @@ parses no JSON, renders nothing.
   exits 3 with "not logged in" (measured: 1 in flight → 12/12 ok, 2 → 9/12,
   3 → 6/12, 4 → 3/12). EVERY `hey` invocation goes through `Tools::Hey.run`, which
   holds a process-wide `Mutex` for the whole subprocess — so no caller can race it:
-  not a `Pool` fan-out, not two tool calls running together, not the `Sources`
+  not two tool calls running together, not the `Sources`
   availability probe. With the lock in place the same 8-way fan-out is 8/8. Never
   shell out to `hey` directly; add it to `Hey.run`.
 - **Concurrency here is fibers, not threads.** `Config.tool_concurrency` defaults to
   **`:fibers`**, so ruby_llm overlaps multiple tool calls from one turn on async —
   the same reactor `Nexo.concurrent` already runs the source agents in.
-  `Tools::Pool` (the in-tool fan-out) honors the SAME setting: `:fibers` goes through
-  `Nexo.concurrent(max_in_flight: size)`, `:threads` runs slices of plain threads, and
-  anything else runs in line. (Until nexo_ai 0.13 it called `RubyLLM::ToolConcurrency`
-  directly; ruby_llm 2.x moved that to a private `RubyLLM::Chat::ToolConcurrency`, so
-  Pool no longer touches ruby_llm internals.) Two properties it must keep, and the
-  reasons they are not optional: an in-flight bound of `size` — Gmail caps simultaneous
-  IMAP connections per account and `hey` serializes on the keyring; and a per-item
-  `guard` (→ `{error:}`), because `Nexo.concurrent` RE-RAISES the first error and stops
-  the rest, and the guard is what keeps one dead
-  thread id from sinking a batch of fifteen. Measured: peak-in-flight tracks `size`
-  exactly (4→4, 8→8), order preserved, and it nests correctly inside the reactor the
-  workflow already runs. This works because Async's scheduler hooks `process_wait`,
-  `io_read` and `io_wait`: `Open3.capture3` and `Net::IMAP` both YIELD rather than
-  block (measured: 4×`sleep 0.4` 1.64s → 0.41s; 4 IMAP connects 0.95s → 0.17s).
+  There is no fan-out INSIDE a tool call any more (`Tools::Pool` was removed with
+  nexo_ai 0.16): its only users were the two HEY tools, and `Hey::LOCK` serializes
+  every `hey` call anyway. A batched HEY tool is a plain loop; `Hey.run` turns
+  anything raised into `{error:}` so one dead thread id cannot sink a batch.
+  `hey` runs through `Nexo::Sandboxes::Subprocess` with `Config.cli_timeout`, which
+  kills a call that hangs instead of leaving the lock held.
   Ruby's `Mutex` is fiber-aware, so `Hey::LOCK` yields instead of deadlocking the
   reactor. `async` is a hard dep of nexo_mail but only a SOFT one of nexo_ai.
 - **The read tools are BATCHED and return JSON STRINGS.** `GmailImap::Read` takes
@@ -375,7 +377,10 @@ parses no JSON, renders nothing.
   (48 listed, 7 committed); before the ledger that same re-read was an accidental
   memory, which is how Apple Mail showed 45 items from an inbox holding 11 in window.
   (2) the file is written **one item per line**, not pretty-printed — the read tool
-  is line-windowed and 204 pretty items were 2,927 lines.
+  pages by lines and characters and 204 pretty items were 2,927 lines. `digest.json`
+  follows the same rule (`DigestFile#layout`): a section longer than 1,000
+  characters is written one entry per line, because `read_file` cuts a line past
+  2,000 characters.
 - **The digest is KEPT, not rebuilt — `NexoMail::DigestFile` decides which run this
   is.** After the inboxes commit, the workflow calls `DigestFile.plan!`: **`:full`**
   (no `digest.state` beside the ledgers, or more than `Config.digest_rebuild_over`
@@ -481,7 +486,7 @@ parses no JSON, renders nothing.
 
 ## Dependencies
 
-`nexo_ai ~>0.14` (which brings `ruby_llm ~>2.2`, MCP included), `mxc` (the OS
+`nexo_ai ~>0.16.1` (which brings `ruby_llm ~>2.2`, MCP included), `mxc` (the OS
 sandbox behind `[dashboard] sandbox = "confined"`), `zeitwerk`,
 `net-imap`, `toml-rb`, `bigdecimal`, `async ~>2.0`, `lipgloss`, `glamour`. Requires
 Ruby **3.3+**. Do NOT add `ruby_llm-mcp` or `ruby_llm-skills`: the first defines the

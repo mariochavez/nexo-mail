@@ -8,11 +8,13 @@ Files (all optional):
 
 | File | Appended to |
 |------|-------------|
-| `common.md` | every agent (Apple Mail, Gmail, HEY, and the merge agent) |
+| `common.md` | every agent |
 | `apple_mail.md` | the Apple Mail agent only |
 | `gmail.md` | the Gmail agent only |
 | `hey.md` | the HEY agent only |
-| `merge.md` | the merge agent only |
+| `synthesize.md` | the agent that builds the digest |
+| `publisher.md` | the agent that renders the dashboard |
+| `archivist.md` | the agent that snapshots the run |
 
 Example — create `gmail.md` with:
 

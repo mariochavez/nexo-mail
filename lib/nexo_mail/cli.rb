@@ -52,18 +52,13 @@ module NexoMail
     def configure_logging
       logger = Logger.new(ENV["RUBYLLM_WIRE"] ? $stdout : File::NULL)
       logger.level = ENV["RUBYLLM_WIRE"] ? Logger::DEBUG : Logger::FATAL
-      RubyLLM.configure { |c| c.logger = logger }
-      if RubyLLM::MCP.respond_to?(:configure)
-        RubyLLM::MCP.configure { |c| c.logger = logger }
-      elsif RubyLLM::MCP.respond_to?(:config)
-        RubyLLM::MCP.config.logger = logger
-      end
+      RubyLLM.configure { |c| c.logger = logger } # ruby_llm's MCP client logs here too
     end
 
     # Point RubyLLM + Nexo at the selected model. Only one model is active per run,
     # so global mutation is correct (no ruby_llm Context needed).
     def configure_model!(cli_alias)
-      model = @active_model = Config.active_model(cli_alias)
+      model = @active_model = NexoMail.active_model = Config.active_model(cli_alias)
       RubyLLM.configure do |c|
         base_setter = "#{model.provider}_api_base="
         key_setter = "#{model.provider}_api_key="
@@ -80,12 +75,7 @@ module NexoMail
         # from the run store, and Nexo's default one is in-memory. One line makes
         # `--resume` possible at all.
         c.run_store = Nexo::RunStore::Disk.new(dir: Config.runs_dir)
-        # Every tool an agent can call is one Nexo attached or one declared with
-        # the `tools` macro. Anything else is refused rather than run ungated.
-        c.strict_tools = true
       end
-      Nexo.config.default_model = model.model
-      Agents::Base.configure_model!(model)
     end
 
     def parse(argv)
@@ -95,7 +85,7 @@ module NexoMail
         o.on("-m", "--model ALIAS", "Use the configured model with this alias (default: first)") { |v| opts[:model] = v }
         o.on("--theme FLAVOR", Theme.flavors, "Catppuccin flavor: #{Theme.flavors.join(", ")}") { |v| opts[:theme] = v }
         o.on("--check", "Preflight only: which model + services are ready") { opts[:check] = true }
-        o.on("--resume [RUN_ID]", "Resume a suspended run (default: the most recent one)") { |v| opts[:resume] = v || :last }
+        o.on("--resume [RUN_ID]", "Continue a paused, failed or interrupted run (default: the most recent one)") { |v| opts[:resume] = v || :last }
         o.on("--prune-snapshots [KEEP]", Integer, "Delete old run snapshots, keeping the newest KEEP (default #{Config.snapshots_keep})") { |v| opts[:prune] = v }
         o.on("--reset-ledger [LANE]", "Forget which mail was already triaged (all of it, or one lane); the next run reads it again") { |lane| opts[:reset_ledger] = lane || true }
         o.on("--rebuild-digest", "Build the digest in full on the next run instead of amending it (no mail is re-read)") { opts[:rebuild_digest] = true }
@@ -121,19 +111,36 @@ module NexoMail
       end
     end
 
-    # Continue a run the workflow paused (it read every inbox, then failed to build
-    # the digest). Re-entering #call skips the extraction checkpoint, so this costs
-    # a synthesis, not three inboxes. Only possible because runs persist to disk —
-    # see the run_store line in #configure_model!.
+    # Continue a run that stopped before it finished, without reading again the
+    # inboxes it already read:
+    #
+    #   suspended    the workflow paused itself (every inbox read, no digest) —
+    #                Workflow.resume
+    #   failed       it raised                                    — Workflow.retry
+    #   interrupted  the process died (Ctrl-C, a crash, a reboot) — Workflow.retry
+    #
+    # A killed process leaves its run "running" on disk, so the sweep that marks
+    # those "interrupted" runs first. Either way #call is re-entered from the top
+    # and each source that finished is returned from the run's checkpoints. Only
+    # possible because runs persist to disk — see the run_store line in
+    # #configure_model!.
+    RESUMABLE = %w[suspended failed interrupted].freeze
+
     def resume(which)
-      run = (which == :last) ? runs.all.find(&:suspended?) : runs.find(which.to_s)
-      unless run&.suspended?
-        warn bad.render(run ? "✗ Run #{run.id} is #{run.status}, not suspended." : "✗ No suspended run to resume.")
+      Nexo::Workflow.reconcile_interrupted!
+      run = (which == :last) ? newest_first.find { |r| RESUMABLE.include?(r.status) } : runs.find(which.to_s)
+      unless run && RESUMABLE.include?(run.status)
+        warn bad.render(run ? "✗ Run #{run.id} is #{run.status}; nothing to resume." : "✗ No unfinished run to resume.")
         exit 1
       end
 
-      puts "  #{dim.render("resuming #{run.id} — #{run.suspend_reason}")}"
-      drive("Resuming") { Workflows::MultiInboxTriage.resume(run.id) }
+      if run.suspended?
+        puts "  #{dim.render("resuming #{run.id} — #{run.suspend_reason}")}"
+        drive("Resuming") { Workflows::MultiInboxTriage.resume(run.id) }
+      else
+        puts "  #{dim.render("retrying #{run.id} — it #{(run.status == "failed") ? "failed: #{run.error}" : "was interrupted"}")}"
+        drive("Retrying") { Workflows::MultiInboxTriage.retry(run.id) }
+      end
     end
 
     # The banner, the spinner and the report, shared by a fresh run and a resume.
@@ -152,8 +159,12 @@ module NexoMail
         error = e
       end
 
-      spin(worker, started, label)
-      worker.join
+      begin
+        spin(worker, started, label)
+        worker.join
+      rescue Interrupt
+        interrupted(worker)
+      end
       print "\r\e[K" # clear the spinner line
 
       if error
@@ -166,13 +177,30 @@ module NexoMail
       trim_runs
     end
 
+    # Ctrl-C. The worker is stopped and its run, still "running" on disk, is marked
+    # interrupted, so `--resume` can pick it up without reading again the inboxes
+    # that had finished. Deliberately not Workflow.cancel: a cancelled run is final.
+    def interrupted(worker)
+      worker.kill
+      Nexo::Workflow.reconcile_interrupted!
+      print "\r\e[K"
+      warn bad.render("✗ Interrupted.")
+      warn "  #{dim.render("finished inboxes are kept — continue with →")} #{dim.render("nexo-triage --resume")}"
+      exit 130
+    end
+
     # The configured run store — Nexo::RunStore::Disk, set in #configure_model!.
     def runs = Nexo::RunStore.default
+
+    # Runs, newest first by when they STARTED. A run's id is a UUIDv7, which sorts
+    # by creation; the store's own order is by file time, and sweeping interrupted
+    # runs rewrites old files.
+    def newest_first = runs.all.sort_by { |run| run.id.to_s }.reverse
 
     # Nexo never prunes run documents: retention is the host's policy, and each one
     # carries this run's artifacts. Keep the newest N, delete the rest. Best-effort.
     def trim_runs
-      runs.all.drop(Config.runs_keep).each { |run| File.delete(run.path) if run.path }
+      newest_first.drop(Config.runs_keep).each { |run| File.delete(run.path) if run.path }
     rescue
       nil
     end
@@ -195,6 +223,7 @@ module NexoMail
       results, stages, unchanged = outcomes(run)
       Sources.all.each { |descriptor| puts source_line(descriptor.name, results[descriptor.name]) }
       print_stage_breakdown(results, stages, total, run_model(run))
+      print_usage(run)
 
       # The synthesis agent wrote the terminal digest into the workspace; read it
       # back only to display (no parsing, no generation on the Ruby side).
@@ -215,7 +244,7 @@ module NexoMail
 
     # Where the wall clock actually went. The sources run CONCURRENTLY, so their
     # times do not add up — the stage costs the slowest one, and that is what is
-    # shown. Each line also carries the number of model round trips it took, which
+    # shown. Each line also carries the number of tool calls it made, which
     # is the number to look at when a run is slow: a stage that doubled its calls is
     # a prompt problem, a stage that kept its calls and doubled its time is not.
     def print_stage_breakdown(results, stages, total, model = nil)
@@ -241,6 +270,22 @@ module NexoMail
       puts "  #{brand.render("total".ljust(13))}#{dim.render(duration(total * 1000).rjust(7))}"
       puts "  #{dim.render("on".ljust(13))}#{dim.render(model)}" if model
     end
+
+    # What the run's agents sent to and got from the model, totalled by Nexo from
+    # the usage each prompt recorded. A cost appears only when ruby_llm has a price
+    # for the model, which a local one never has.
+    def print_usage(run)
+      usage = Nexo::Workflow.usage(run)
+      tokens = usage["tokens"]
+      return if tokens.empty?
+
+      line = "#{number(tokens["input_tokens"])} in · #{number(tokens["output_tokens"])} out"
+      line += " · #{number(tokens["cache_read_tokens"])} cached" if tokens["cache_read_tokens"].to_i.positive?
+      line += format(" · $%.2f", usage["cost"]) if usage["cost"]
+      puts "  #{dim.render("tokens".ljust(13))}#{dim.render(line)}"
+    end
+
+    def number(value) = value.to_i.to_s.reverse.scan(/\d{1,3}/).join(",").reverse
 
     # What this run actually ran on, from the run's own payload — so an old run
     # read back from runs_dir reports the model it used, not whichever one happens
@@ -504,7 +549,7 @@ module NexoMail
       line "-m, --model ALIAS        Use a configured model by alias (default: the first)"
       line "    --theme FLAVOR        #{Theme.flavors.join(" | ")} (default from config)"
       line "    --check               Preflight: which model + services are ready"
-      line "    --resume [RUN_ID]     Continue a paused run (default: the most recent) without re-reading the inboxes"
+      line "    --resume [RUN_ID]     Continue a paused, failed or interrupted run without re-reading the inboxes"
       line "    --prune-snapshots [N] Prune run snapshots, keeping the newest N (default #{Config.snapshots_keep})"
       line "    --reset-ledger [LANE] Forget which mail was already triaged — all of it, or one lane"
       line "    --rebuild-digest      Build the digest in full on the next run (no mail is re-read)"

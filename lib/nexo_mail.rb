@@ -24,13 +24,21 @@ require_relative "nexo_mail/version"
 module NexoMail
   class Error < StandardError; end
 
+  class << self
+    # The model this run uses (a Config model entry), set by the CLI once config is
+    # loaded. Every agent class reads its model and provider from here.
+    attr_accessor :active_model
+  end
+
   # The gem's root and its bundled (packaged) asset directory.
   ROOT = File.expand_path("..", __dir__)
   DATA_DIR = File.join(ROOT, "data")
 
-  # Sandbox capabilities every triage agent gets: read/glob for the workspace plus
-  # write (to save its digest). Mode stays :read_only, so the MCP axis is fail-closed
-  # and shell is denied — write is the only capability granted beyond the defaults.
+  # Sandbox capabilities every triage agent gets: read (which covers listing and
+  # searching the workspace; :glob is kept for Nexo's allow-list default and asks
+  # for nothing) plus write, to save its digest. Mode stays :read_only, so the MCP
+  # axis is fail-closed and shell is denied — write is the only capability granted
+  # beyond the defaults.
   SANDBOX_WRITE = %i[read glob write].freeze
 
   # Apple Mail READ tools AppleMailSource may invoke; names must match the

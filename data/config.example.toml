@@ -54,7 +54,9 @@ flavor = "mocha"
 # Runs themselves are persisted too, one JSON document each — status, event log,
 # checkpoints and recorded artifacts. That is what makes `nexo-triage --resume`
 # possible: a run that read every inbox and then failed to build the digest pauses
-# instead of dying, and resuming skips straight back to synthesis. Keep the newest N.
+# instead of dying, and resuming skips straight back to synthesis. A run that failed
+# or was interrupted resumes too, without reading again the inboxes it had finished.
+# Keep the newest N.
 # runs_dir  = "${XDG_STATE_HOME:-~/.local/state}/nexo-mail/runs"
 # runs_keep = 20
 
@@ -77,27 +79,27 @@ flavor = "mocha"
 
 # ── Dashboard ───────────────────────────────────────────────────────────────
 # The Publisher renders dashboard.html from a template + a render script. Both are
-# AUTO-RESOLVED from the skill the Publisher declares — ruby_llm-skills finds that
-# skill's assets/ and scripts/ — so you only need these settings to OVERRIDE them.
+# AUTO-RESOLVED from the skill the Publisher declares — its assets/ and scripts/
+# — so you only need these settings to OVERRIDE them.
 # Point `template` at your own HTML to restyle the dashboard without touching the
 # gem; the render script injects the run's digest.json into the template's
 # `__DIGEST_JSON__` placeholder.
-# The Publisher runs the render script inside a sandbox shell with a narrowed PATH.
-# If your Ruby is version-managed (mise/asdf/rbenv) and `ruby` won't resolve there,
-# pin `ruby` to an absolute interpreter path.
+# The Publisher runs the render script with the Ruby that runs nexo-triage itself.
+# Set `ruby` only to use a different interpreter (an absolute path).
 #
-# WHERE it renders is `sandbox`: "local" (default — the shared workspace, same as
-# every other agent) or "docker" / "apple" (a throwaway container with no network,
-# dropped capabilities and a read-only rootfs). The Publisher is the only agent
+# WHERE it renders is `sandbox`: "confined" (default where the OS supports it — an
+# OS sandbox around the command: no network, only the workspace writable), "local"
+# (an ordinary host process, unfenced) or "docker" / "apple" (a throwaway container
+# with no network, dropped capabilities and a read-only rootfs). The Publisher is the only agent
 # holding a shell and it reaches no mail, so containerizing it costs the pipeline
 # nothing. In a container the interpreter comes from the `image` — `ruby` below
-# applies to the local sandbox only, and an absolute `template`/`renderer` override
+# applies to the confined and local sandboxes only, and an absolute `template`/`renderer` override
 # is ignored there because a host path does not exist inside the container.
 # `nexo-triage --check` probes whichever of these you pick.
 # [dashboard]
-# sandbox  = "local"          # local | docker | apple
+# sandbox  = "confined"       # confined | local | docker | apple
 # image    = "ruby:3.3-slim"  # containerized runs only
-# ruby     = "ruby"
+# ruby     = "/path/to/ruby"  # default: the Ruby running nexo-triage
 # template = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/assets/dashboard-template.html"
 # renderer = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/scripts/render_dashboard.rb"
 
@@ -124,11 +126,8 @@ flavor = "mocha"
 # hey_payload_max_chars = 40000   # ceiling on a whole thread-read reply (4000..200000)
 # digest_rebuild_over   = 60      # new items past which the digest is rebuilt
 #                                 # in full instead of amended         (1..500)
-# hey_concurrency       = 1       # `hey` fan-out tasks per tool call (1..8)
-#                                 # Leave at 1: `hey` cannot run concurrently (it
-#                                 # races on the macOS keyring), so nexo_mail holds
-#                                 # a mutex across every invocation. Raising this
-#                                 # only queues fibers behind that lock.
+# cli_timeout           = 120     # seconds one `hey` call may take before it is
+#                                 # stopped (5..900). `hey` calls run one at a time.
 #
 # How ruby_llm runs MULTIPLE tool calls emitted in one assistant turn:
 #   "fibers"  (default) — via async, the same reactor the sources fan out in

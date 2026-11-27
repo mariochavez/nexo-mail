@@ -107,11 +107,11 @@ happens to land. Each agent **declares** its output, and the workflow copies tho
 bytes onto the run record itself:
 
 ```ruby
-class Synthesize < SourceAgent
+class Synthesize < Base
   produces "digest.json", "inbox-digest.md"
 end
 
-class Publisher < SourceAgent
+class Publisher < Base
   produces "dashboard.html"
 end
 ```
@@ -215,6 +215,11 @@ where the checkpoint hands back the stored extraction instead of re-running it, 
 the run continues into synthesis. The CLI says so at the end of a paused run rather
 than leaving you to guess.
 
+`--resume` also continues a run that **failed** or was **interrupted** (Ctrl-C, a
+crash, a reboot), through `Nexo::Workflow.retry`: `#call` is re-entered the same way and
+each source that had finished comes back from its checkpoint. A killed process leaves
+its run `"running"` on disk, so `Workflow.reconcile_interrupted!` marks it first.
+
 None of that works on Nexo's default run store, which is in-memory and dies with the
 process. One line in the CLI is what makes it durable:
 
@@ -245,7 +250,8 @@ converge to the same abstraction the agent sees: **a tool it can call.**
 Gmail and HEY are **tool-based** sources: they share **one** `EmailSource` agent
 that reads its tools + prompt key from a `NexoMail::Sources` **descriptor**, so
 adding another IMAP/CLI-style service is a descriptor, not a class. `SourceAgent`
-attaches the descriptor's tools in `#chat` (`super`, then `with_tools(...)`).
+attaches the descriptor's tools through Nexo's `tools` macro, with a callable given
+the agent (`tools ->(agent) { agent.descriptor.tools }`).
 Apple Mail keeps its own `AppleMailSource` because the `mcp` macro is class-level
 and can't be expressed per-instance.
 
@@ -262,20 +268,14 @@ name is an explicit error rather than a silent fallback.
 Gmail one IMAP session instead of N, since `with_inbox` opens a fresh connection per
 call. Both listings now carry a plain-text `snippet` (Gmail via a grouped partial
 IMAP fetch + MIME decoding, HEY from the `summary` the API already returns), so most
-messages are classified without any body read at all. `Tools::Pool` provides the
-bounded fan-out inside a single tool call, over `Nexo.concurrent`.
+messages are classified without any body read at all.
 
-**Concurrency is fibers end to end, and it is one setting.** The workflow fans its
-source agents out with `Nexo.concurrent`; `Config.tool_concurrency` (default
-`:fibers`) makes ruby_llm overlap multiple tool calls from a single assistant turn on
-that same reactor; and `Tools::Pool` — the fan-out *inside* one batched tool call —
-runs on `Nexo.concurrent`, the very same reactor, so it carries no reactor
-plumbing of its own and honors the same knob. Pool adds exactly two things: an
-in-flight bound (Gmail caps simultaneous IMAP connections while `hey` serializes on
-the keyring), and a per-item `guard` that turns a raise into `{error:}` (`Nexo.concurrent` re-raises
-the first error and abandons the rest — one dead thread id must not sink a batch). This is sound because Async's scheduler hooks `process_wait`/`io_read`/
-`io_wait`, so `Open3.capture3` and `Net::IMAP` yield instead of blocking — four
-`sleep 0.4` subprocesses go 1.64s → 0.41s, and four IMAP connects 0.95s → 0.17s.
+**Concurrency is fibers, and it is one setting.** The workflow fans its source agents
+out with `Nexo.concurrent`, and `Config.tool_concurrency` (default `:fibers`) makes
+ruby_llm overlap multiple tool calls from a single assistant turn on that same
+reactor. Async's scheduler hooks `process_wait`/`io_read`/`io_wait`, so a subprocess
+and `Net::IMAP` yield instead of blocking. Inside one batched tool call the work is a
+plain loop: the only fan-out there was for `hey`, which cannot run concurrently.
 
 The one resource that cannot take concurrency is the `hey` CLI, which races on the
 macOS keyring. `Tools::Hey.run` holds a process-wide fiber-aware `Mutex` around every
@@ -341,7 +341,8 @@ XSS-safe, and restyling means editing the template — never the app's Ruby.
   read subcommands with no general shell.
 - **Fenced writes.** Every agent runs a `:local` sandbox rooted at the workspace;
   the path guard rejects `../` traversal and symlink escapes. Beyond read-only,
-  agents get only `:write` (`SANDBOX_WRITE = %i[read glob write]`).
+  agents get only `:write` (`SANDBOX_WRITE = %i[read glob write]`; `:glob` asks for
+  nothing since nexo_ai 0.16, where listing and searching are `:read`).
 - **One scoped shell exception, optionally containerized.** The **Publisher alone**
   also gets `:shell`, purely to run the render script — it attaches no mail tools and
   reads only the already-produced `digest.json`. Every mail-reading agent stays
@@ -349,9 +350,9 @@ XSS-safe, and restyling means editing the template — never the app's Ruby.
   the Publisher's does not). `[dashboard] sandbox = "confined"` fences that shell with
   an OS sandbox over the same workspace; `"docker"` moves it off the host entirely,
   into a network-less container.
-- **Declared tools only.** Host tools are attached through Nexo's `tools` macro and
-  the CLI sets `Nexo.config.strict_tools`, so a tool nobody declared is refused rather
-  than run ungated. `ArchiveRun`/`PruneSnapshots` carry `capability: :write`.
+- **Declared tools only.** Host tools are attached through Nexo's `tools` macro, and
+  Nexo refuses by default (`strict_tools`) a tool nobody declared rather than run it
+  ungated. `ArchiveRun`/`PruneSnapshots` carry `capability: :write`.
 - **Bounded destructive tools.** `PruneSnapshots` deletes only inside the snapshots
   dir; the agent decides *to* prune, the tool does the deletion deterministically.
 - **De-dup, twice.** Cross-source (the same email in two inboxes) and cross-group
@@ -399,9 +400,8 @@ Every inbox-touching agent stays strictly read-only — verify with
 ## Why this shape
 
 - **Ruby stays thin.** Tools + orchestration only, so behavior is tuned by editing
-  skills, and the app never parses model output or renders HTML. The accepted
-  trade: money arithmetic runs in the model (a `compute_totals` tool could make it
-  deterministic if needed).
+  skills, and the app never parses model output or renders HTML. Money arithmetic is the exception to "the model does it":
+  `Tools::MoneyReport` computes the totals from the record.
 - **One agent per stage/source** keeps each context small and lets a flaky source
   fail in isolation. Sources fan out **concurrently** via `Nexo.concurrent` (opt-in
   `async`), falling back to sequential.

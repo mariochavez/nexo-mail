@@ -170,13 +170,32 @@ module NexoMail
         edits.keys
       end
 
-      # One top-level key per line: compact enough to read back cheaply on the next
-      # update, and still one section per line when a human diffs two digests.
+      # Past this many characters a list or an object is written one entry per line.
+      LINE = 1_000
+
+      # Short lines, because of how the file is read back: the next update reads it
+      # through ruby_llm's read_file, which cuts any line past 2,000 characters and
+      # pages at 20,000. So a section is one line while it is short, and one ENTRY
+      # per line once it is not — which is also what a human wants when diffing two
+      # digests. Plain JSON either way.
       def write(digest)
-        body = digest.map { |key, value| "#{JSON.generate(key)}: #{JSON.generate(value)}" }.join(",\n")
         tmp = "#{path}.tmp"
-        File.write(tmp, "{\n#{body}\n}\n")
+        File.write(tmp, "#{layout(digest)}\n")
         File.rename(tmp, path)
+      end
+
+      # +value+ as JSON, with anything long broken into one entry per line.
+      def layout(value, indent = "")
+        compact = JSON.generate(value)
+        return compact if compact.length <= LINE || !(value.is_a?(Hash) || value.is_a?(Array)) || value.empty?
+
+        inner = "#{indent}  "
+        if value.is_a?(Hash)
+          entries = value.map { |key, entry| "#{inner}#{JSON.generate(key.to_s)}: #{layout(entry, inner)}" }
+          "{\n#{entries.join(",\n")}\n#{indent}}"
+        else
+          "[\n#{value.map { |entry| "#{inner}#{layout(entry, inner)}" }.join(",\n")}\n#{indent}]"
+        end
       end
 
       # The lengths of the lists as written, beside the counts the builder stated,

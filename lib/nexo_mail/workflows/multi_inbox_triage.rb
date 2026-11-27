@@ -95,8 +95,8 @@ module NexoMail
           "array of the items you extracted to `#{inbox}` in the workspace (`[]` if " \
           "nothing new arrived), then call commit_extraction with that file: it merges " \
           "them with what earlier runs kept and writes `#{file}`.",
-          max_turns: 30
-        ) { |type, payload| forward_event(name, type, payload) }
+          max_turns: 30, cancel: -> { cancel_requested? }
+        ) { |type, payload| emit_agent_event(type, payload, source: name) }
 
         # The commit, not the file: `file` survives in the workspace from the run
         # before, so its existence proves nothing about this one. An uncommitted
@@ -109,6 +109,8 @@ module NexoMail
           emit(:source_failed, source: name, error: "extraction was not committed to the ledger", ms: ms_since(started))
           nil
         end
+      rescue RubyLLM::CancelledError
+        raise # the run was cancelled: that is not this source failing
       rescue => e
         emit(:source_failed, source: name, error: e.message, ms: ms_since(started))
         nil
@@ -131,8 +133,12 @@ module NexoMail
         text = block_given? ? yield(agent) : prompt
         return if text.nil?
 
-        agent.prompt(text, max_turns: max_turns) { |type, payload| forward_event(tag, type, payload) }
+        agent.prompt(text, max_turns: max_turns, cancel: -> { cancel_requested? }) do |type, payload|
+          emit_agent_event(type, payload, source: tag)
+        end
         emit(:"#{tag}_done", ms: ms_since(started))
+      rescue RubyLLM::CancelledError
+        raise
       rescue Nexo::EnvironmentError => e
         # The agent declared what its sandbox must provide (`requires`) and the
         # sandbox does not provide it. Distinct from a model/tool failure and worth
@@ -202,12 +208,12 @@ module NexoMail
 
       # Stages the Publisher's skill resources INTO the sandbox, then builds the
       # render command against them. Everything the agent touches is therefore inside
-      # the sandbox and reachable through Nexo's permission-gated read/glob tools —
+      # the sandbox and reachable through Nexo's permission-gated file tools —
       # skill files otherwise live outside it and are invisible to those tools.
       #
       # Which skill, and which files: entirely dynamic. The agent's own `skills`
-      # declaration is the single source of truth, and ruby_llm-skills (via
-      # Nexo::Skills) enumerates its scripts/ and assets/. Nothing here names a skill
+      # declaration is the single source of truth, and Nexo::Skills
+      # enumerates its scripts/ and assets/. Nothing here names a skill
       # or a filename. [dashboard] in config.toml still overrides either path, in
       # which case that absolute path is used as-is rather than staged.
       #
@@ -234,7 +240,7 @@ module NexoMail
         end
 
         "Render the dashboard per the #{skill} skill, with the shell tool. Its script " \
-          "and template have been staged into your workspace, so you can read or glob " \
+          "and template have been staged into your workspace, so you can read or list " \
           "them if you need to. Run exactly:\n\n" \
           "  #{publisher_ruby} #{renderer.inspect} digest.json #{template.inspect} dashboard.html\n\n" \
           "Then confirm in one line. Do not hand-write the HTML."
@@ -246,7 +252,7 @@ module NexoMail
       def publisher_ruby = Config.dashboard_containerized? ? "ruby" : Config.dashboard_ruby
 
       # Copies every file the skill ships into the sandbox, preserving the
-      # scripts//assets/ layout so the agent can glob `scripts/*` the way the skill's
+      # scripts//assets/ layout so the agent can list `scripts/` the way the skill's
       # own prose describes. Returns workspace-relative paths grouped by kind.
       #
       # Nexo::Skills.materialize does this through the SANDBOX's own #write.
@@ -287,17 +293,6 @@ module NexoMail
 
       def clock = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       def ms_since(t0) = ((clock - t0) * 1000).round
-
-      # Mirror an agent event into the workflow log with a compact, tagged shape.
-      def forward_event(source, type, payload)
-        data =
-          case type
-          when :tool_call then {source: source, tool: payload.respond_to?(:name) ? payload.name : payload.to_s}
-          when :tool_result then {source: source, result: payload.to_s[0, 200]}
-          else {source: source, info: payload.to_s[0, 200]}
-          end
-        emit(:"agent_#{type}", **data)
-      end
     end
   end
 end

@@ -5,7 +5,7 @@ module NexoMail
     # Publishes the dashboard. The design and the render live in the
     # dashboard_designer SKILL (a fixed template + a render script). The workflow
     # STAGES both into the workspace before this agent runs — so they are reachable
-    # through its permission-gated read/glob tools, which skill files outside the
+    # through its permission-gated file tools, which skill files outside the
     # sandbox are not — and this agent RUNS the script with the Shell tool. Every
     # path in the command is workspace-relative.
     #
@@ -17,7 +17,7 @@ module NexoMail
     class Publisher < Base
       skills :dashboard_designer
 
-      # Add :shell on top of the sandbox read/glob/write, so Nexo attaches the Shell
+      # Add :shell on top of the sandbox read and write, so Nexo attaches the Shell
       # tool. Mode stays :read_only.
       permissions Nexo::Permissions.new(mode: :read_only, allow: %i[read glob write shell])
 
