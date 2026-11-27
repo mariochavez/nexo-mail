@@ -68,6 +68,7 @@ module NexoMail
       # their commits are what fill the pending lists.
       def plan!
         @committed = false
+        @staged = {}
         @plan = decide
       end
 
@@ -76,13 +77,18 @@ module NexoMail
       # survives from the run before.
       def committed? = @committed == true
 
+      # A section a TOOL built, to be saved with the next commit. It wins over the
+      # same key in the builder's file: the point of staging is that the model does
+      # not copy the section, so a copy it wrote anyway is the less reliable one.
+      def stage(key, value) = (@staged ||= {})[key.to_s] = value
+
       # Replace the top-level keys in +update+ (a Hash), or the whole digest on a
       # full build. Returns what was done; raises ArgumentError with a message meant
       # for the builder when the update cannot be applied.
       def commit(update)
         raise ArgumentError, "the update must be a JSON object of top-level digest keys" unless update.is_a?(Hash)
 
-        update = update.dup
+        update = update.merge(@staged || {})
         edits = update.delete(EDIT)
         whole = plan == :full && !committed?
         digest = whole ? whole_digest(update) : current.merge(update)
@@ -90,19 +96,9 @@ module NexoMail
         write(digest)
         Ledger.all.each { |ledger| ledger.digested!(all: whole) }
         save_state
+        @staged = {}
         @committed = true
         {mode: whole ? "full" : "update", replaced: update.keys, edited: edited, lists: lists(digest)}
-      end
-
-      # The charges the saved digest already lists, every currency together — each
-      # one a row Tools::SumPayments itself produced. Empty when there is no digest.
-      def saved_charges
-        blocks = current.dig("finance", "by_currency")
-        return [] unless blocks.is_a?(Hash)
-
-        blocks.values.grep(Hash).flat_map { |block| Array(block["charges"]) }
-      rescue ArgumentError
-        []
       end
 
       # Forget that a digest was ever built: the next run rebuilds it in full from

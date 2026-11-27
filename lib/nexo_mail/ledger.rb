@@ -153,7 +153,27 @@ module NexoMail
       save
     end
 
+    # Drop every item filed in +lane+, and the record of having seen it, so the
+    # next run lists that mail again and triages it afresh — for when the rules for
+    # one kind of mail changed and the rest need not be re-read. Returns how many.
+    def forget_lane(lane)
+      gone = @items.select { |_, item| item["lane"].to_s == lane.to_s }.keys
+      return 0 if gone.empty?
+
+      gone.each do |key|
+        @items.delete(key)
+        @seen.delete(key)
+      end
+      @pending -= gone
+      save
+      gone.size
+    end
+
     def size = @items.size
+
+    # Every item on record, whatever its age — for the tools that report across
+    # the whole history (money) rather than one run's window.
+    def items = @items.values
 
     def seen_count = @seen.size
 

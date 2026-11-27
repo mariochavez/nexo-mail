@@ -1,12 +1,12 @@
 ---
 name: financial_summary
-description: Identify and normalize money in an inbox — receipts, invoices, charges, bills, subscriptions, refunds, and payment-due notices — into a consistent `payment` object so a spend picture (totals + chart) can be built. Never fabricate amounts.
+description: Identify and normalize money in an inbox — receipts, invoices, charges, bills, statements, subscriptions, refunds, payouts and income — into a consistent `payment` object, and build the money picture from the record with the money_report tool. Never fabricate amounts.
 ---
 
 # Financial Extraction
 
-Whenever a message is about money the reader paid, was charged, owes, or was
-refunded, attach a `payment` object to that item. This is what powers the money
+Whenever a message is about money the reader paid, was charged, owes, received,
+or was refunded, attach a `payment` object to that item. This is what powers the money
 picture on the dashboard — the totals, the subscription list, and the chart.
 Accuracy beats completeness: **a wrong number is worse than a missing one.**
 
@@ -19,6 +19,7 @@ Accuracy beats completeness: **a wrong number is worse than a missing one.**
   "currency": "USD",
   "direction": "charged",
   "kind": "subscription",
+  "date": "2026-07-15",
   "due_date": null
 }
 ```
@@ -26,11 +27,25 @@ Accuracy beats completeness: **a wrong number is worse than a missing one.**
 | Field | Meaning |
 |---|---|
 | `merchant` | Who was paid / who billed. The company, not the email sender bot. |
-| `amount` | The number ONLY — no symbols, no thousands separators. `1234.50`, not `"$1,234.50"`. A real value you read in the message; never estimated. |
+| `amount` | The number ONLY — no symbols, no thousands separators. `1234.50`, not `"$1,234.50"`. A real value you read in the message; never estimated. `null` only for a bill that states no figure (see below). |
 | `currency` | ISO code, upper-case: `USD`, `EUR`, `MXN`, `GBP`… Infer from the symbol (`$`→`USD` unless context says otherwise, `€`→`EUR`, `£`→`GBP`). If truly unknown, use `null`. |
-| `direction` | `paid` (you completed a payment) · `charged` (a card/account was billed, incl. receipts) · `due` (a bill/invoice awaiting payment) · `refund` (money returned to you). |
-| `kind` | `one_time` or `subscription` (recurring — "monthly", "annual", "your plan renews"). |
+| `direction` | `paid` (you completed a payment) · `charged` (a card/account was billed, incl. receipts) · `due` (a bill, invoice or statement awaiting payment) · `income` (money that came IN: a client paid you, payroll, a payout, interest or returns credited) · `refund` (money you had spent, returned to you). |
+| `kind` | `one_time` · `subscription` (recurring — "monthly", "annual", "your plan renews") · `bill` (a utility or service bill: electricity, phone, internet) · `statement` (a card or account statement). |
+| `date` | ISO date the money moved, when the message states one; otherwise omit it and the message date is used. |
 | `due_date` | ISO date when a `due` payment is owed; otherwise `null`. |
+
+**Income is not a refund.** Payroll paying the reader, a client's transfer arriving,
+a payout: `income`. A refund is only money coming BACK from something he bought.
+Filing income as a refund is how a pay run was once reported as a return.
+
+**A bill with no figure is still a bill.** When a notice says a payment is owed but
+states no amount anywhere — not in the snippet and not in the body — emit `payment`
+with `direction: "due"`, `amount: null`, and the `due_date` if given. It is listed
+as an open bill and adds nothing to any total.
+
+**Statements.** A card or account statement is `kind: "statement"`, `direction:
+"due"`, with the amount to pay (the payment due, else the full balance) and the
+`due_date`.
 
 ## How to read amounts
 
@@ -63,7 +78,7 @@ lending/investment accounts and the money picture must include them:
 - **Yo Te Presto** (also "YoTePresto" / "yotepresto")
 
 Extract the most relevant figure: a contribution or deposit → `paid`; a return,
-payout, or interest credited → `refund`; a payment owed or upcoming → `due`; an
+payout, or interest credited → `income`; a payment owed or upcoming → `due`; an
 amount debited/charged → `charged`. Currency is usually **MXN** unless the
 message says otherwise. If a message truly carries no number, still keep the item
 (category `payment`) and note it in the summary — just omit `amount` so it isn't
@@ -81,44 +96,51 @@ synthesis; this is about collapsing multiple emails describing one charge.)
 ## Where the amount comes from
 
 The listing snippet usually already contains the total — receipts lead with it.
-Read it from there. Only when the snippet genuinely cuts the number off should
-you open the message, and then **collect every such id and make ONE batched read
-call**, not one per receipt (see "Reading efficiently" in
-[email_triage](../email_triage/SKILL.md)).
+Read it from there.
 
-A Paper Trail box of forty receipts is not forty reads. It is one listing, then
-at most one batched read for the handful whose totals the snippet truncated.
+**A money message whose snippet shows no amount MUST be opened.** This is the one
+place a body read is required rather than optional: a bill, statement, payout or
+receipt without its figure is worth almost nothing to the money picture, and most
+of the reader's bills and statements were once recorded with no amount at all for
+exactly this reason. Collect every such id and make ONE batched read call (see
+"Reading efficiently" in [email_triage](../email_triage/SKILL.md)); money reads
+have their own allowance there. If the body has no figure either, record the bill
+with `amount: null`.
 
-## Never add up money yourself — and keep currencies apart
+A Paper Trail box of forty receipts is still not forty reads. It is one listing,
+then one batched read for the ones whose totals the snippet did not show.
 
-When you roll payments up into totals, **call the `SumPayments` tool** with every
-payment that belongs in the briefing, in one call, and copy its answer through. Do
-not add the numbers yourself and do not re-derive the totals afterwards.
+## The money picture comes from `money_report`
 
-It returns `by_currency`, where **each currency is a self-contained block carrying
-its own `charges` list AND its own totals** computed from exactly that list. Write
-both from the same block. This is not a style preference: when the totals and the
-list were produced separately they drifted — a real run reported USD
-`charged: 289.00` against its own list summing to `269.00`, and MXN
-`refund: 7,979.84` against a list summing to `7,899.98` with a count of 5 for four
-entries.
+When you build the digest, **call `money_report`** — do not gather payments, do not
+add anything up, and do not write `finance` yourself. The tool reads every payment
+on record, computes the section and hands it to `commit_digest`.
 
-**Never merge currencies.** Not in a total, not in a chart, not in a sentence. There
-is no exchange rate here and the tool will never invent one — MXN 7,899.98 and USD
-1,138.00 are two facts, not one. Report them as separate blocks, biggest `out`
-first.
+- Each currency is a self-contained block carrying its own rows AND the totals of
+  exactly those rows: `income`, `refund`, `paid`, `charged`, `due`, `out`, `in`,
+  `net`.
+- **Currencies are never merged.** Not in a total, not in a chart, not in a
+  sentence. There is no exchange rate here — MXN 7,899.98 and USD 1,138.00 are two
+  facts, not one.
+- The tool does not know what today is: you pass the period.
 
-The tool is a calculator, nothing more: it does not know what today is and will add
-up whatever you give it. **Deciding which payments belong is your job** — filter to
-the run window before you call it.
+Two judgments stay yours, because they are judgments:
 
-If it returns `needs_direction` or `ignored`, those payments were NOT counted. Fix
-the `direction` or `amount` and call again, or leave them out and say so — never
-fold them into a total by hand.
+- **A bill and its payment.** When `open_bills` shows a bill and the rows show a
+  later payment to the same merchant that plainly paid it, call `money_report`
+  again with `settled: [{"bill": "<bill id>", "payment": "<payment id>"}]`. The
+  bill stops counting as due. It is remembered.
+- **One transaction, two wordings.** When two rows are the same charge described
+  differently (an order confirmation and the card alert for it), pass the weaker
+  one's id in `skip`. Rows that are identical field for field are already counted
+  once.
+
+If it returns `needs_direction`, those rows were NOT counted — say so rather than
+folding them in by hand.
 
 ## When unsure
 
-If you cannot read a definite amount, omit `payment` and let the message stand
-on its `category`/`summary` alone. The money picture is built only from numbers
-you actually saw. That is always the right answer — never spend an extra round
-trip chasing a number, and never estimate one to avoid the omission.
+Never estimate. After the body read, a receipt or payout with no legible amount
+gets no `payment` at all and stands on its `summary`; a bill or statement keeps its
+`payment` with `amount: null`. The money picture is built only from numbers you
+actually saw.

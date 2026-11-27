@@ -22,11 +22,12 @@ module NexoMail
       # the workspace (nexo_ai >= 0.9).
       produces "digest.json", "inbox-digest.md"
 
-      # The digest is where money arithmetic happens, and where it was measurably
-      # wrong: by_currency reported USD 289.00 against its own list summing to 269.00
-      # (and the true extracted figure was 1218.00). SumPayments does the addition and
-      # hands back the list and the totals together so they cannot drift apart.
-      tools Tools::SumPayments, Tools::NewItems
+      # Money is computed, not transcribed: MoneyReport reads every payment on record,
+      # sums it per currency and stages the finished `finance` section for
+      # CommitDigest. The model used to add the numbers (USD 289.00 against its own
+      # list summing to 269.00), then to re-type them into a calculator; now it does
+      # neither. NewItems hands over what no digest holds yet.
+      tools Tools::MoneyReport, Tools::NewItems
 
       # Replaces sections of digest.json and marks the items as digested. It changes
       # files on the host, so it is declared :write and gated like Nexo's own write.
@@ -38,7 +39,8 @@ module NexoMail
         build, read the extraction files it names and build the whole digest. On an
         UPDATE, call new_items for the mail triaged since the digest was saved, read
         `digest.json`, and change only what that mail touches. Either way: merge and
-        de-duplicate, roll up the money per currency with sum_payments, order the
+        de-duplicate, get the money picture from money_report (it saves `finance`
+        itself — never write that key), order the
         schedule, and narrate stories, people and topic briefings. You never write
         `digest.json` yourself: write the top-level keys you built or changed to
         `digest.update.json` (exactly the schema in the skill) and call commit_digest,

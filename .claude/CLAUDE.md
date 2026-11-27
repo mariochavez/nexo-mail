@@ -13,7 +13,7 @@ formats a digest — express that as a `data/skills/*/SKILL.md` and let an agent
 it. The lone exception: a bounded, correctness-critical primitive may be a thin
 Ruby **tool** the agent *calls* (e.g. `PruneSnapshots` deletes dirs
 deterministically; the agent decides *to* call it). Money arithmetic USED to run in the
-model; it was measurably wrong, so it now runs in `Tools::SumPayments`, which the
+model; it was measurably wrong, so it now runs in `Tools::MoneyReport`, which the
 agent calls — the carve-out, not an exception to it.
 
 ## Commands
@@ -25,6 +25,7 @@ exe/nexo-triage --help               # config + per-service setup docs
 exe/nexo-triage                      # run a triage (needs a model + services)
 exe/nexo-triage --prune-snapshots 20 # agent-driven prune, keep newest 20
 exe/nexo-triage --reset-ledger       # forget what was triaged; next run is a full read
+exe/nexo-triage --reset-ledger money # forget one lane only; that mail is triaged again
 exe/nexo-triage --rebuild-digest     # next run builds the digest in full (no mail re-read)
 RUBYLLM_WIRE=1 exe/nexo-triage       # show raw ruby_llm/MCP logs
 gem build nexo_mail.gemspec           # package (data/** must be included)
@@ -56,7 +57,7 @@ lib/nexo_mail/
                             #   Gmail/HEY) + AppleMailSource (MCP), Synthesize (digest),
                             #   Publisher (dashboard), Archivist
   tools/                    # CliReader, Pool, Hey/HeyBox/HeyThread, CappedTool,
-                            #   Today, SumPayments (deterministic primitives),
+                            #   Today, MoneyReport (deterministic primitives),
                             #   GmailImap(::List/::Read/::Mime/::BodyPart),
                             #   ArchiveRun, PruneSnapshots, CommitExtraction (ledger merge),
                             #   UnseenOnly (ledger filter around an MCP listing),
@@ -195,7 +196,7 @@ parses no JSON, renders nothing.
   anywhere — but it must inherit `Agents::Base`.
 - **Host tools are declared with Nexo's `tools` macro (nexo_ai >= 0.14), never by
   calling `with_tools` in `#chat`.** `Base` declares `Tools::Today` for everyone;
-  `Synthesize` adds `SumPayments`; `EmailSource` adds a lambda reading its descriptor;
+  `Synthesize` adds `MoneyReport`; `EmailSource` adds a lambda reading its descriptor;
   `Archivist` declares `ArchiveRun`/`PruneSnapshots` with `capability: :write`, which
   wraps them in `Nexo::GatedTool` (allowed because the shared permissions grant
   `:write`). The mail-reading tools carry no capability — read-only by construction.
@@ -309,18 +310,35 @@ parses no JSON, renders nothing.
   already past — and reported 2023 receipts as June charges. The fix is the `Today`
   tool plus a skill rule to call it FIRST; there is no date injected into prompts.
 - **Money arithmetic is a TOOL now, not the model** — this reverses the old
-  "accepted tradeoff". `Tools::SumPayments` (attached to `Synthesize`) is a pure
-  calculator: BigDecimal addition, grouped per currency, NEVER converting between
-  them, and it makes no judgments — it does not know the date, does not filter, and
-  refuses to guess a direction (unrecognised ones come back in `needs_direction`,
-  uncounted). Each currency is a self-contained block holding its own `charges` list
+  "accepted tradeoff". `Tools::MoneyReport` (attached to `Synthesize`) reads every
+  `payment` on the ledgers itself — the model passes a PERIOD, never the payments,
+  and never copies the result: the finished `finance` section is staged
+  (`DigestFile.stage`) and saved by `commit_digest`, winning over any `finance` the
+  model wrote anyway. Its predecessor `SumPayments` summed whatever the model
+  re-typed into its arguments: right arithmetic over an unreliable transcription.
+  BigDecimal, grouped per currency, NEVER converting. Directions are `paid`,
+  `charged`, `due` (out) and `income`, `refund` (in) — `income` exists because a
+  pay run was being filed as a refund. It makes no judgments: the period is
+  the caller's, an unrecognised direction comes back in `needs_direction` uncounted,
+  and only a row IDENTICAL to another (merchant, amount, currency, direction, date)
+  is counted once on its own. The two real judgments arrive as arguments and are
+  remembered in `ledger/money.json`: `settled: [{bill, payment}]` (that bill stops
+  counting as due) and `skip: [ids]` (same transaction, different wording). It also
+  returns `open_bills` (unpaid, amount or not — a bill whose notice shows no figure
+  is `amount: null`, listed, never summed; `overdue` is date order against `until`),
+  `previous` (an earlier period's totals) and `recurring_missing` (merchants with
+  outflow in 2+ earlier calendar months and none in the period — set arithmetic;
+  whether one is actually late is the skill's call). Money is read by CALENDAR
+  MONTH, with the HEY Paper Trail listed back 90 days (`days_ago 90`) so there is a
+  previous month to compare. `--reset-ledger money` re-triages just that lane
+  (`Ledger#forget_lane`). Each currency is a self-contained block holding its own `charges` list
   AND the totals of that list, so the two cannot drift — they did: a run reported USD
   `charged: 289.00` against its own list summing to 269.00 (true figure 1218.00), and
   MXN `refund: 7,979.84` against 7,899.98 with `count: 5` for four entries.
 - **Never merge currencies.** There is no FX rate anywhere in this project. The
   dashboard template used to sum `charged`/`due`/`paid` ACROSS currencies and label
   the result with the dominant one; it now renders one block per currency. Money is
-  separated by currency in `SumPayments`, in `digest.json`'s `finance.by_currency`,
+  separated by currency in `MoneyReport`, in `digest.json`'s `finance.by_currency`,
   in the dashboard, and in `inbox-digest.md`.
 - **Read shaping is config, and it is the only real bound.** The `[read]` block /
   `NEXO_MAIL_*` vars (see `Config.read_int`) cap list size, snippet length, batch
@@ -374,15 +392,14 @@ parses no JSON, renders nothing.
   reports list lengths beside the stated `counts`. The workflow suspends unless
   `DigestFile.committed?` — NOT on the file's existence, which is how a failed
   synthesis used to pass as done behind the previous run's `digest.json`.
-  `Tools::SumPayments(saved_since:)` counts the charges the saved digest already
-  lists (exact repeats reported under `already_counted`), so an update sends only
-  the new payments. `--rebuild-digest` deletes `digest.state`; `--reset-ledger` does
+  `--rebuild-digest` deletes `digest.state`; `--reset-ledger` does
   too. Measured on one day's real mail: full build 4m17s / 11 calls (96 items); an
   update with 1 new item 49s; with 6 new items, two carrying payments, 2m26s; nothing
   new 14s for the whole run. What was learned getting there: replacing whole lists
   made an update write 13KB to place five items (2m36s) — hence `edit`; and one
   pending payment sent the builder back through every extraction file to re-send all
-  the charges (3m11s) — hence `saved_since`. What remains is model thinking time,
+  the charges (3m11s) — which is why money now comes from `MoneyReport` reading the
+  record. What remains is model thinking time,
   not bytes. The seed-once gotcha applies: `inbox_synthesis` must be copied over an
   existing install, or the agent follows the old skill and writes `digest.json`
   directly (which then never commits, and the run suspends).

@@ -48,30 +48,32 @@ same when their sender and normalized subject match (ignore a leading
 `Re:`/`Fwd:`). Keep one, record BOTH services in its `sources` array, and keep
 the strongest bucket (`action` > `fyi` > `noise`).
 
-## 2. Roll up the money — per currency, with the tool
+## 2. The money picture — from the tool
 
-Gather every item carrying a `payment` **whose date is inside the window**, and pass
-them all in ONE call to `SumPayments`. Filtering is your job — the tool has no idea
-what today is and will faithfully add up whatever you hand it.
+Call `money_report` ONCE with:
 
-Build `finance` from what it returns. Its `by_currency` is already the shape you
-want: **each currency is a self-contained block holding its own `charges` list and
-its own totals** (`charged`/`paid`/`due`/`refund`, plus `out`, `net`, `count`,
-`subscriptions`). Copy each block through as-is.
+- `since` = `month_start`, `until` = `today` — money is read by **calendar month**;
+- `compare_since` = `previous_month_start`, `compare_until` = the day before
+  `month_start` — last month's totals, for comparison;
+- `bills_since` = `days_ago 90` — an unpaid bill from last month is still unpaid.
 
-**Do not add the numbers yourself and do not re-derive the totals afterwards.** When
-the totals and the list were produced separately they drifted: a real run reported
-USD `charged: 289.00` against its own list summing to 269.00.
+**Do not write `finance`.** The tool builds the section from every payment on
+record and `commit_digest` saves it. You never gather payments, add numbers or
+copy the result. See [financial_summary](../financial_summary/SKILL.md).
 
-- **Keep currencies apart everywhere** — totals, lists and the terminal digest. There
-  is no exchange rate here, and the tool will never invent one. Two honest totals
-  beat one merged fiction. Order currencies by the size of `out`, biggest first.
-- The chart is the biggest outflows (`out`) within a single currency — never across.
-- If the tool returns `needs_direction` or `ignored`, those payments were NOT counted.
-  Fix the `direction`/`amount` and call again, or leave them out and say so — never
-  fold them into a total by hand.
+What you do with what it returns:
 
-See [financial_summary](../financial_summary/SKILL.md).
+- **Match bills to payments.** If `open_bills` lists a bill and the rows show a
+  later payment that plainly settled it, call again with `settled`. If two rows are
+  one transaction under different wording, call again with `skip`. At most one
+  follow-up call.
+- **Say what matters** in the headline and `inbox-digest.md`: overdue or soon-due
+  bills first, then income received, then what was spent — per currency, never
+  merged.
+- **`recurring_missing`** lists merchants billed in two or more earlier months and
+  not yet this month. Mention one only when its usual day has already passed;
+  early in a month most of that list is simply not due yet.
+- An open bill that is overdue or due within 7 days also gets an `action` card.
 
 ## 3. Order the schedule — upcoming only
 
@@ -180,13 +182,10 @@ Do not re-read the extraction files and do not re-emit sections that did not cha
      week old, `opportunities` whose date has passed, `jobs` older than 14 days,
      `fyi` cards older than 30. An `action` card is never dropped for age alone.
 4. **Money only when money changed.** If a new item carries a `payment`, or the
-   window moved, call `SumPayments` ONCE with ONLY the new payments and
-   `saved_since` set to `window_start`. The tool adds the charges the digest
-   already lists from that date on, so you never re-send them and never go looking
-   for them in the extraction files. Replace `finance` with what it returns (same
-   rules as section 2). A new payment that is the same transaction as a saved
-   charge under a different wording must be left out — the tool only recognises
-   exact repeats. With no new payment and no moved window, leave `finance` out.
+   month changed since the digest was built, call `money_report` exactly as in
+   section 2. It re-reads the record and replaces `finance` on commit — you send no
+   payments and write no `finance` key. Otherwise do not call it, and `finance`
+   stays as it is.
 5. **Write `digest.update.json`** — as little as says what changed. A key you
    leave out is kept untouched, so never include a section just to repeat it.
    - **Lists change one entry at a time, under `edit`.** Do NOT re-write `action`,
@@ -208,7 +207,8 @@ Do not re-read the extraction files and do not re-emit sections that did not cha
    - Everything else is replaced whole, as a top-level key: always `generated_at`
      (the timestamp from the prompt); `counts` whenever a list or the noise tally
      changed; `headline` when the shape of the inbox did; `sources` / `skipped`
-     when the inboxes that ran differ; `finance` and `schedule` when they changed.
+     when the inboxes that ran differ; `schedule` when it changed. Never `finance`:
+     `money_report` saves it.
    - If nothing changed but the day, the update is just `generated_at` and
      `schedule` if you pruned it.
 6. Call `commit_digest`. It returns how long each list is as saved beside your
@@ -277,22 +277,7 @@ top-level keys that changed.
   "topics": [
     { "topic": "ruby", "label": "Ruby", "headline": "", "bullets": [], "briefing": "", "count": 0 }
   ],
-  "finance": {
-    "currencies": ["MXN", "USD"],
-    "by_currency": {
-      "USD": {
-        "charged": 0, "paid": 0, "due": 0, "refund": 0,
-        "out": 0, "net": 0, "count": 0, "subscriptions": 0,
-        "charges": [
-          { "merchant": "", "amount": 0, "currency": "USD",
-            "direction": "charged|paid|due|refund", "kind": "one_time|subscription",
-            "date": "", "subject": "", "source": "" }
-        ]
-      }
-    },
-    "dominant_currency": "USD",
-    "chart": { "currency": "USD", "bars": [ { "label": "", "amount": 0 } ] }
-  },
+  "finance": "— built and saved by money_report; never written by you —",
   "schedule": [
     { "title": "", "start": "", "end": "", "location": "", "link": "",
       "rsvp": false, "sender": "", "subject": "", "source": "" }
@@ -333,9 +318,10 @@ _<headline>_
 ## Needs action (<n>)
 - **<sender>** — <subject>: <the one thing that matters>
 
-## Money
+## Money — <month>
+- **Bills:** <merchant> <amount or "amount not shown"> due <date> (OVERDUE when it is)
 ### <CURRENCY>
-<charged/paid/due/refund one-liner> — <n> subscriptions
+in <income + refund> · out <paid + charged + due> — <n> subscriptions (last month: out <previous out>)
 <repeat one block per currency, biggest `out` first; never merge currencies>
 
 ## Schedule

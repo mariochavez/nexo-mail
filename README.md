@@ -69,6 +69,7 @@ nexo-triage                 # triage all configured sources → digest
 nexo-triage --check         # preflight: which model + services are ready
 nexo-triage --resume        # continue a paused run without re-reading the inboxes
 nexo-triage --reset-ledger  # forget which mail was triaged; the next run reads everything
+nexo-triage --reset-ledger money # forget one lane only (after changing its rules)
 nexo-triage --rebuild-digest # build the digest in full next run (no mail is re-read)
 nexo-triage --model cloud   # pick a configured model by alias
 nexo-triage --theme latte   # override the theme for this run
@@ -98,6 +99,11 @@ instead of one per notification, a deadline list for open calls and workshops, a
 a lane yourself, copy `data/senders.example.toml` to
 `~/.config/nexo-mail/senders.toml`; a sender pinned as `ephemeral` is never sent to
 the model at all.
+
+Money is read by calendar month from every payment on record: income and spending
+per currency (never converted), the bills still unpaid — including ones whose
+notice shows no amount — last month's totals, and recurring charges that have not
+appeared yet. The numbers are computed by a tool, not written by the model.
 
 The digest is kept the same way. A run hands the digest agent only the items triaged
 since the digest was last saved, and it rewrites just the entries and sections they
