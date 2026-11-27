@@ -23,7 +23,8 @@ module NexoMail
           that; this tool does not know what today is.
 
           Returns only mail an earlier run has NOT already triaged; `already_triaged`
-          counts what was left out. An empty list means nothing new arrived.
+          counts what was left out. An empty list means nothing new arrived. A message
+          may carry `lane`: where this sender's mail has gone before — the default for it.
 
           ONE call returns everything you need to classify the whole inbox. Classify
           from the snippet. Do NOT call the read tool for a message the snippet already
@@ -61,8 +62,15 @@ module NexoMail
             next {messages: [], count: 0, already_triaged: triaged} if uids.empty?
 
             rows = envelopes(imap, uids)
+            # Before the snippets: a sender the reader fixed as ephemeral is settled
+            # here and costs no body fetch.
+            kept, routed = SenderMemory.route(rows.values) do |row|
+              {id: row[:uid], sender: row[:from], sender_email: row[:from], subject: row[:subject], received_at: row[:date]}
+            end
+            ledger.route(routed)
+            rows = kept.to_h { |row| [row[:uid], row] }
             attach_snippets(imap, rows, chars) if chars.positive?
-            {messages: rows.values.reverse, count: rows.size, already_triaged: triaged} # newest first
+            {messages: rows.values.reverse, count: rows.size, already_triaged: triaged, routed_ephemeral: routed.size} # newest first
           end
           JSON.generate(result)
         end

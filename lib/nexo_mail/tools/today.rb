@@ -28,8 +28,13 @@ module NexoMail
         comparison you make.
 
         Returns `today`, `weekday`, the current `month` with its `month_start` and
-        `month_end`, and `previous_month` / `next_month`.
+        `month_end`, `previous_month` / `next_month`, and `days_ago` — the dates 7,
+        14, 30 and 90 days before today, so you never subtract days yourself.
       DESC
+
+      # Calendar arithmetic the model gets wrong, offered as plain dates. Which of
+      # them means anything is still the skills' business.
+      DAYS_AGO = [7, 14, 30, 90].freeze
 
       def execute
         today = Date.today
@@ -45,7 +50,8 @@ module NexoMail
           month_end: Date.new(today.year, today.month, -1).iso8601,
           previous_month: first.prev_month.strftime("%Y-%m"),
           previous_month_start: first.prev_month.iso8601,
-          next_month: first.next_month.strftime("%Y-%m")
+          next_month: first.next_month.strftime("%Y-%m"),
+          days_ago: DAYS_AGO.to_h { |days| [days.to_s, (today - days).iso8601] }
         )
       end
     end

@@ -63,6 +63,72 @@ What this changes for you:
 - **Carry the `id` on every item** — the listing's own id for that message — so
   the record can tell a message it has from one it does not.
 
+## Lanes: what kind of mail this is
+
+Every item carries a `lane`. The bucket says whether the reader must act; the lane
+says what KIND of mail it is, and each kind is kept and shown differently — a
+newsletter issue is read once and gone in a month, a conversation matters for as
+long as it is open, a verification code never mattered at all.
+
+| `lane` | What goes in it | Emit |
+|---|---|---|
+| `conversation` | Mail from a person, or a thread the reader is part of: clients, collaborators, friends, family, an organisation writing to him specifically. | Full item. `people` when you know them. |
+| `money` | Anything about money moving or owed: receipts, invoices, bills, statements, payouts, payment confirmations, renewals. | Full item with `payment` whenever a number is readable. |
+| `dev` | Software work arriving as notifications: GitHub (PRs, issues, reviews, CI, Dependabot), RubyGems, error trackers, deploys, Slack digests. | Full item with `dev` (below). |
+| `reading` | Newsletters and publications read for their content: Ruby and Rails news, tech news, photography and photobook publishers. | Item with `topics`. |
+| `opportunity` | Something with a date to act by that is not a meeting: open calls, workshops, book launches, fairs, festivals, grant or submission deadlines, ticket sales. | Full item with `opportunity` (below). |
+| `jobs` | Job boards and job alerts (RubyRoles, Rails Job Board, Calm Companies and the like). | One item per mailing, `summary` naming the two or three roles worth a look. |
+| `ephemeral` | Mail whose value is gone once seen: verification codes, login alerts, delivery tracking, promotions and sales, "your export is ready". | Minimal item: `id`, `lane`, `bucket: "noise"`, `sender`, `sender_email`, `subject`, `received_at`, and an empty `summary`. Do not read its body. |
+
+Rules:
+
+- **One lane per item — the one it is most useful in.** A GitHub invoice is `money`,
+  not `dev`. A newsletter announcing an open call with a deadline is `opportunity`.
+  A person writing about an invoice is `conversation` (and still carries `payment`).
+- **A listing row may arrive with a `lane` already on it.** That is where this
+  sender's mail has gone before. Use it as the default and move on; depart from it
+  only when this particular message is plainly something else.
+- **The lane does not decide the bucket.** A `dev` item is `action` when a review is
+  waiting on the reader; a `money` item is `action` when a bill is due.
+- **Emit `ephemeral` items too** — minimally. They are counted, and they teach the
+  record which senders are ephemeral.
+
+### `dev`: one record per pull request or issue
+
+Sixteen notifications about one pull request are one thing the reader needs to know:
+where that PR stands. So every `dev` item names the thing it is about:
+
+```json
+"dev": { "ref": "owner/repo#123", "kind": "pr", "title": "Stop loading the world at boot",
+         "state": "open", "waiting_on_me": true }
+```
+
+- `ref` — `owner/repo#number` for a PR or issue, exactly as GitHub writes it. For
+  anything else, a short stable handle: `rubygems:nexo_ai`, `fragua:errors`,
+  `slack:workspace`. The same thing must get the same `ref` every time.
+- `kind` — `pr` | `issue` | `ci` | `release` | `error` | `security` | `chat` | `other`.
+- `state` — `open` | `merged` | `closed` | `failing` | `passing` | `released`, when
+  the message says so.
+- `waiting_on_me` — `true` only when the reader's review, reply or fix is what it is
+  waiting for (review requested, a question addressed to him, his PR failing CI).
+
+Several notifications about the same `ref` in one listing: emit ONE item for it,
+with the `id` of the newest and a `summary` of where it stands now.
+
+### `opportunity`: what, and by when
+
+```json
+"opportunity": { "what": "HYDRA open call for photobook dummies", "deadline": "2026-12-15",
+                 "starts": null, "where": "Mexico City", "link": "https://…" }
+```
+
+An invitation addressed to the reader for a set day and time (an opening, a talk, a
+dinner, anything asking for an RSVP) is a `meeting`, not an `opportunity`: give it
+`meeting` and the `conversation` lane so it lands in the schedule.
+
+`deadline` is the last day to act; `starts` is when the event itself happens. Give
+whichever the message states, as ISO dates; never guess one.
+
 ## Reading efficiently
 
 Tool calls are sequential — every one is a full round trip — so the shape of your
@@ -120,10 +186,19 @@ Two steps, in this order:
 
 1. **Write** a single JSON array to the `*.new.json` file the caller names, with
    the write tool. No markdown, no prose in the file — just the array. One object
-   per NEW message you keep (skip pure Noise unless an "always surface" rule
-   applies); `[]` if nothing new arrived.
-2. **Call `commit_extraction`** once, with `file` set to that same file and
-   `keep_since` set to your `window_start`. It merges your items with what earlier
+   per NEW message — several notifications about one `dev` thing collapse into
+   one, and `ephemeral` mail gets its minimal item; `[]` if nothing new arrived.
+2. **Call `commit_extraction`** once, with `file` set to that same file,
+   `keep_since` set to your `window_start`, and `keep_by_lane` taken straight from
+   `Today`'s `days_ago` — never subtract days yourself:
+
+   ```json
+   { "conversation": "<days_ago 90>", "money": "<days_ago 90>", "opportunity": "<days_ago 90>",
+     "dev": "<days_ago 30>", "reading": "<days_ago 30>",
+     "jobs": "<days_ago 14>", "ephemeral": "<days_ago 7>" }
+   ```
+
+   It merges your items with what earlier
    runs kept, writes the inbox's full extraction file, and records the mail you
    were listed as triaged. **Skip this and the run counts as failed** — the same
    mail is simply offered again next time.
@@ -134,6 +209,7 @@ Then reply with a one-line confirmation.
 [
   {
     "id": "40182",
+    "lane": "money",
     "bucket": "action",
     "category": "payment",
     "sender": "Netflix",
@@ -161,6 +237,7 @@ Required on every item:
 | Field | Values / shape |
 |---|---|
 | `id` | the message's id exactly as the listing gave it — HEY posting `id`, Gmail `uid`, Apple Mail `id`. Not the `thread_id`. Never invent one. |
+| `lane` | `conversation` \| `money` \| `dev` \| `reading` \| `opportunity` \| `jobs` \| `ephemeral` — see [Lanes](#lanes-what-kind-of-mail-this-is). |
 | `bucket` | `"action"` \| `"fyi"` \| `"noise"` — Action = reader must reply/decide/do; FYI = worth knowing, no response; Noise = newsletters/notifications/receipts (still emit if it carries a payment, meeting, or topic worth a picture). |
 | `category` | one of: `payment`, `meeting`, `personal`, `work`, `newsletter`, `notification`, `travel`, `security`, `other`. |
 | `sender` | display name (fall back to the address). |
@@ -181,6 +258,8 @@ Optional — include ONLY when the message genuinely carries it:
   `start`/`end` are ISO datetimes; `rsvp` is `true` when a response is expected.
 - `people`: array of person names the reader personally knows who are central to
   the message (for `personal` items especially). Omit for machine senders.
+- `dev`: required on every `dev`-lane item — see above.
+- `opportunity`: required on every `opportunity`-lane item — see above.
 - `topics`: array of short topic tags for `newsletter` items — see
   [interest_radar](../interest_radar/SKILL.md). E.g. `["ruby", "rails"]`,
   `["photography"]`.
@@ -209,7 +288,8 @@ Treat any message mentioning one of these as important — set `bucket` to
 
 - Extract, don't summarize into prose. The file is data.
 - Never invent amounts, dates, times, or names. Omit the optional field instead.
-- One object per kept message. Deduplicate obvious repeats of the same thread.
+- One object per message, with its `lane`. Deduplicate obvious repeats of the same
+  thread, and collapse notifications about the same `dev` `ref`.
 - If a tool call fails, extract what you can from what you read and carry on;
   the array you write is still valid JSON.
 - Write the array exactly once, call `commit_extraction` exactly once, then

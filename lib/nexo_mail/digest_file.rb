@@ -42,7 +42,7 @@ module NexoMail
     # that says which entry is which. Without this a single new card meant
     # re-emitting its whole list: a measured update wrote 13KB to place five items.
     EDITABLE = {"action" => "id", "fyi" => "id", "stories" => "title", "people" => "name",
-                "topics" => "topic"}.freeze
+                "topics" => "topic", "dev" => "ref", "opportunities" => "id", "jobs" => "id"}.freeze
     EDIT = "edit"
 
     class << self

@@ -55,11 +55,17 @@ module NexoMail
         return result unless rows.is_a?(Array) && rows.all? { |row| row.is_a?(Hash) && row.key?("id") }
 
         fresh = @ledger.take(rows) { |row| row["id"] }
+        shown, routed = SenderMemory.route(fresh) do |row|
+          {id: row["id"], sender: row["sender"], sender_email: row["sender"], subject: row["subject"],
+           received_at: row["date_received"] || row["date"]}
+        end
+        @ledger.route(routed)
         JSON.generate(
-          messages: fresh,
-          count: fresh.size,
+          messages: shown,
+          count: shown.size,
           already_triaged: rows.size - fresh.size,
-          note: "Only mail not triaged by an earlier run is listed."
+          routed_ephemeral: routed.size,
+          note: "Only mail not triaged by an earlier run is listed. `lane`, when present, is where this sender's mail has gone before."
         )
       rescue JSON::ParserError
         result

@@ -22,6 +22,10 @@ module NexoMail
     end
 
     def skills_dir = path("NEXO_MAIL_SKILLS_DIR", data["skills_dir"], File.join(config_dir, "skills"))
+    # The reader's own sender → lane rules (see SenderMemory). Optional; absent
+    # means every sender is left to the agent.
+    def senders_file = path("NEXO_MAIL_SENDERS_FILE", data["senders_file"], File.join(config_dir, "senders.toml"))
+
     def prompts_dir = path("NEXO_MAIL_PROMPTS_DIR", data["prompts_dir"], File.join(config_dir, "prompts"))
     def sandbox_dir = path("NEXO_MAIL_SANDBOX_DIR", data["sandbox_dir"], File.join(state_home, APP, "sandbox"))
 
@@ -186,6 +190,12 @@ module NexoMail
     def gmail_body_chars = read_int("NEXO_MAIL_GMAIL_BODY_CHARS", "gmail_body_chars", 4_000, 200..20_000)
 
     def hey_box_limit = read_int("NEXO_MAIL_HEY_BOX_LIMIT", "hey_box_limit", 40, 1..200)
+
+    # How many postings per box are FETCHED, as opposed to shown. The listing filters
+    # out what the ledger has seen and shows the newest `hey_box_limit` of the rest,
+    # so a backlog deeper than one listing drains over the next runs instead of
+    # never being reached.
+    def hey_fetch_limit = read_int("NEXO_MAIL_HEY_FETCH_LIMIT", "hey_fetch_limit", 200, 1..500)
 
     def hey_snippet_chars = read_int("NEXO_MAIL_HEY_SNIPPET_CHARS", "hey_snippet_chars", 200, 0..1_000)
 
