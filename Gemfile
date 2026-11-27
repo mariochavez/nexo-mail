@@ -9,6 +9,3 @@ group :development do
   gem "rake"
   gem "standard" # linter + formatter (github.com/standardrb/standard)
 end
-
-# TEMPORARY until nexo_ai 0.16.1 is on rubygems.
-gem "nexo_ai", path: "../nexo"
