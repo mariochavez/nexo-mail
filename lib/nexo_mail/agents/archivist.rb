@@ -7,6 +7,8 @@ module NexoMail
     # the tools do the bounded file work, the agent decides the calls.
     class Archivist < Base
       skills :snapshot_keeper
+      # It works through its two tools alone, so it carries no file tools.
+      file_tools :none
 
       # Both tools change files on the host (the snapshots directory), so they are
       # declared as :write. Nexo's permission gate then decides every call, exactly as

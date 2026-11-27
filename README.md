@@ -6,8 +6,9 @@ with a Catppuccin-themed terminal UI. **Read-only**: it reads and searches mail 
 writes only into a sandboxed workspace — it can't send, delete, flag, or move mail.
 
 One executable, **`nexo-triage`**, runs a Nexo Workflow: one read-only triage agent
-per source classifies its inbox and writes a digest fragment into the sandbox; a
-merge agent combines them into one `inbox-digest.md`. Sources that aren't configured
+per source classifies its inbox and writes what it extracted into the sandbox; a
+synthesis agent builds one digest from them, a publisher renders the dashboard and an
+archivist snapshots the run. Sources that aren't configured
 are skipped (with a reason); the run continues with whatever's available.
 
 ## Install
@@ -17,7 +18,7 @@ gem install nexo_mail        # or add `gem "nexo_mail"` to a Gemfile
 nexo-triage --help           # how to configure everything
 ```
 
-Requires Ruby 3.2+ and macOS for Apple Mail. First run creates the config under XDG:
+Requires Ruby 3.3+ and macOS for Apple Mail. First run creates the config under XDG:
 
 ```
 $XDG_CONFIG_HOME/nexo-mail/          (default ~/.config/nexo-mail/)
@@ -67,7 +68,7 @@ indexing, the Gmail App Password steps, building the `hey` CLI).
 ```sh
 nexo-triage                 # triage all configured sources → digest
 nexo-triage --check         # preflight: which model + services are ready
-nexo-triage --resume        # continue a paused run without re-reading the inboxes
+nexo-triage --resume        # continue a paused, failed or interrupted run without re-reading the inboxes
 nexo-triage --reset-ledger  # forget which mail was triaged; the next run reads everything
 nexo-triage --reset-ledger money # forget one lane only (after changing its rules)
 nexo-triage --rebuild-digest # build the digest in full next run (no mail is re-read)
@@ -113,7 +114,9 @@ without re-reading any mail — use it after editing the `inbox_synthesis` skill
 
 A run that reads every inbox and then fails to build the digest **pauses** rather
 than dying: the extraction is checkpointed, so `--resume` picks up at synthesis
-instead of re-reading three inboxes. Runs persist as one JSON document each under
+instead of re-reading three inboxes. `--resume` also continues a run that failed or
+was interrupted (Ctrl-C, a crash, a reboot): each inbox that had finished is not read
+again. Runs persist as one JSON document each under
 `$XDG_STATE_HOME/nexo-mail/runs`.
 
 `--check` also probes the **sandbox**, not only your services: the render stage needs
@@ -128,7 +131,7 @@ though it resolves in your terminal. If it doesn't, preflight says so and you pi
   (seeded from the bundled default on first run; your edits win and survive upgrades).
 - **Per-agent prompt fragments** — drop Markdown in `~/.config/nexo-mail/prompts/`:
   `common.md` (appended to every agent) or `apple_mail.md` / `gmail.md` / `hey.md` /
-  `merge.md`. They're appended to the agent's instructions, not replaced.
+  `synthesize.md` / `publisher.md` / `archivist.md`. They're appended to the agent's instructions, not replaced.
 - **Theme** — `[theme] flavor` (or `NEXO_MAIL_THEME_FLAVOR` / `--theme`). Catppuccin
   Latte / Frappé / Macchiato / Mocha, applied to both the UI and the digest.
 
@@ -139,7 +142,7 @@ though it resolves in your terminal. If it doesn't, preflight says so and you pi
   wrappers shell out via argv arrays (no injection) to hardcoded read subcommands.
 - **Fenced writes.** Agents run a `:local` sandbox rooted at the XDG sandbox dir;
   path traversal and symlink escapes are rejected.
-- **Least privilege.** Every agent runs under `:read_only` with only `:read/:glob/:write`.
+- **Least privilege.** Every agent runs under `:read_only` and may only read and write files in the workspace.
   The Publisher alone also gets `:shell`, purely to run the bundled render script; it
   attaches no mail tools at all.
 - **That one shell is fenced.** By default the render command runs inside an OS sandbox
@@ -160,8 +163,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 
 ```
 lib/nexo_mail/
-  agents/      SourceAgent + AppleMailSource / GmailSource / HeySource / MergeDigests
-  tools/       CliReader, Pool, Hey/HeyBox/HeyThread, CappedTool,
+  agents/      Base, SourceAgent, EmailSource, AppleMailSource, Synthesize, Publisher, Archivist
+  tools/       CliReader, Hey/HeyBox/HeyThread, McpWrapper (CappedTool, UnseenOnly),
                GmailImap(::List/::Read/::Mime/::BodyPart)
   workflows/   MultiInboxTriage
   config.rb    XDG/TOML config + ${VAR} + ENV precedence

@@ -13,40 +13,15 @@ module NexoMail
     # JSON array of objects, each with an `id`). Anything else — an error string, a
     # shape the server changes to — passes through untouched, which costs a re-read
     # and never hides mail.
-    class UnseenOnly
+    class UnseenOnly < McpWrapper
       def initialize(tool:, ledger:)
-        @tool = tool
+        super(tool: tool)
         @ledger = ledger
-      end
-
-      def call(**arguments)
-        filter(@tool.call(**arguments))
-      end
-
-      # Mirror GatedTool/CappedTool: #execute routes through #call.
-      def execute(*args, **kwargs)
-        call(**(args.first || {}).to_h, **kwargs)
-      end
-
-      def name = @tool.name
-
-      def respond_to_missing?(method_name, include_private = false)
-        return true if method_name == :execute
-
-        @tool.respond_to?(method_name, include_private) || super
-      end
-
-      def method_missing(method_name, *args, **kwargs, &block)
-        if @tool.respond_to?(method_name)
-          @tool.public_send(method_name, *args, **kwargs, &block)
-        else
-          super
-        end
       end
 
       private
 
-      def filter(result)
+      def transform(result)
         text = text_of(result)
         return result unless text
 
@@ -69,14 +44,6 @@ module NexoMail
         )
       rescue JSON::ParserError
         result
-      end
-
-      # MCP replies arrive as a String or as a content object that prints as one.
-      def text_of(result)
-        return result if result.is_a?(String)
-        return result.text if result.respond_to?(:text) && result.text.is_a?(String)
-
-        nil
       end
     end
   end

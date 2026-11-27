@@ -43,8 +43,8 @@ module NexoMail
       # parallel processes race and every loser exits 3 with "not logged in" —
       # measured over 12 box fetches: 1 in flight -> 12/12 ok, 2 -> 9/12, 3 -> 6/12,
       # 4 -> 3/12. This mutex is the invariant, held for the whole subprocess, so the
-      # race is impossible no matter who calls: a Pool fan-out, two tool calls running
-      # together under Config.tool_concurrency, or the availability probe in Sources.
+      # race is impossible no matter who calls: two tool calls running together under
+      # Config.tool_concurrency, or the availability probe in Sources.
       #
       # A plain Mutex is the right primitive even inside the reactor: Ruby's Mutex is
       # fiber-aware, so a contending fiber YIELDS rather than deadlocking the thread
@@ -55,9 +55,12 @@ module NexoMail
       module_function
 
       # Every `hey` invocation in the process goes through here. Returns CliReader's
-      # parsed JSON / { error: } shape unchanged.
+      # parsed JSON / { error: } shape; anything raised becomes { error: } too, so one
+      # dead thread id cannot sink a batch of fifteen.
       def run(*argv)
         LOCK.synchronize { CliReader.json("hey", *argv) }
+      rescue => e
+        {error: "#{e.class}: #{e.message}"}
       end
 
       def names = BOXES.keys

@@ -9,8 +9,7 @@ module NexoMail
       #
       # 1. BATCHED. Every uid in the request shares one connection, so a run costs two
       #    IMAP sessions (list + read) instead of 1 + N. It also costs ONE model round
-      #    trip instead of N, which is the larger saving — RubyLLM's tool_concurrency
-      #    is off, so tool calls are strictly sequential.
+      #    trip instead of N, which is the larger saving.
       #
       # 2. DECODED. The old tool returned raw BODY[TEXT]: on a multipart message that
       #    is MIME boundaries and base64, so the 4000-character budget was spent on

@@ -122,7 +122,7 @@ end
 
 `app/skills/pandas_pipeline/SKILL.md` is where the actual reusable
 `.py`/`.ninja` script *text* belongs — reference material the agent reads
-through its own gated `ReadFile` tool, not new capability (see the main
+through its own gated `read_file` tool, not new capability (see the main
 skill's "Assuming `skills :name` widens what an agent can do" pitfall — the
 same rule applies here):
 

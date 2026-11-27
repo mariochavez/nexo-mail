@@ -56,8 +56,8 @@ module NexoMail
 
     # --- Skill-bundled resources ----------------------------------------------
     # Skills may ship runnable files beside their prose — `scripts/`, `assets/`,
-    # `references/` — which is ruby_llm-skills' own convention, not ours. Resolve
-    # them THROUGH that layer (Nexo::Skills.find delegates to it) instead of
+    # `references/` — which is the SKILL.md convention, not ours. Resolve
+    # them THROUGH Nexo::Skills instead of
     # joining paths by hand, so a skill can rename its files, or a new
     # script-bearing skill can appear, with no code change here.
     #
@@ -104,11 +104,13 @@ module NexoMail
     end
 
     # The Ruby interpreter the Publisher uses to run the render script inside its
-    # sandbox shell. Defaults to "ruby" (resolved on PATH); pin an absolute path
-    # (e.g. a mise-managed Ruby) when the sandbox's narrowed PATH won't resolve it.
-    def dashboard_ruby
-      val("NEXO_MAIL_DASHBOARD_RUBY", data.dig("dashboard", "ruby"), "ruby")
-    end
+    # sandbox shell. Defaults to the interpreter running this CLI, by absolute path,
+    # so a narrowed sandbox PATH cannot fail to find it; `[dashboard] ruby` pins
+    # another one.
+    def dashboard_ruby = dashboard_ruby_pin || RbConfig.ruby
+
+    # The `[dashboard] ruby` setting, or nil when the CLI's own Ruby is used.
+    def dashboard_ruby_pin = val("NEXO_MAIL_DASHBOARD_RUBY", data.dig("dashboard", "ruby"))
 
     # What fences the Publisher's shell: "confined" (an OS sandbox), "docker" /
     # "apple" (a container per command) or "local" (nothing). The Publisher is the
@@ -145,20 +147,22 @@ module NexoMail
     # What a fenced render command may READ besides the workspace: the directory of
     # a `[dashboard] template` / `renderer` override (an absolute host path), and —
     # for the OS sandbox, which runs the host's own interpreter — that interpreter's
-    # install. Without the latter ruby starts and then cannot load its stdlib.
+    # install. Without the latter ruby starts and then cannot load its stdlib. For
+    # the CLI's own Ruby that is Nexo's `:ruby` preset (its prefix and gem paths);
+    # for a pinned one, its install prefix.
     def dashboard_readable(ruby: true)
       overrides = [val("NEXO_MAIL_DASHBOARD_TEMPLATE", data.dig("dashboard", "template")),
         val("NEXO_MAIL_DASHBOARD_RENDERER", data.dig("dashboard", "renderer"))]
       paths = overrides.compact.map { |path| File.dirname(File.expand_path(path)) }
-      paths << dashboard_ruby_prefix if ruby
+      paths << (dashboard_ruby_pin ? dashboard_ruby_prefix : :ruby) if ruby
       paths.compact.uniq
     end
 
-    # The install prefix of the interpreter `[dashboard] ruby` names. Found by
+    # The install prefix of the interpreter `[dashboard] ruby` pins. Found by
     # walking PATH and resolving shims and symlinks; nil when it cannot be found, in
     # which case the confined render fails loudly rather than guessing.
     def dashboard_ruby_prefix
-      ruby = dashboard_ruby
+      ruby = dashboard_ruby_pin
       path = ruby.include?("/") ? ruby : ENV["PATH"].to_s.split(File::PATH_SEPARATOR).map { |dir| File.join(dir, ruby) }.find { |candidate| File.executable?(candidate) }
       path && File.expand_path("..", File.dirname(File.realpath(path)))
     rescue SystemCallError
@@ -205,12 +209,10 @@ module NexoMail
 
     def hey_payload_max_chars = read_int("NEXO_MAIL_HEY_PAYLOAD_MAX_CHARS", "hey_payload_max_chars", 40_000, 4_000..200_000)
 
-    # How many `hey` fan-out tasks one tool call may start. DEFAULT 1, because the
-    # work is serial anyway: `hey` cannot run concurrently (it races on the macOS
-    # keyring), so Tools::Hey::LOCK holds a mutex across every invocation and raising
-    # this only queues fibers behind it. The lock — not this number — is the safety
-    # invariant; see Tools::Hey for the measurements.
-    def hey_concurrency = read_int("NEXO_MAIL_HEY_CONCURRENCY", "hey_concurrency", 1, 1..8)
+    # Seconds one CLI call (`hey`) may take before it is stopped. `hey` calls run one
+    # at a time behind Tools::Hey::LOCK, so a call that never returns would block
+    # every later one.
+    def cli_timeout = read_int("NEXO_MAIL_CLI_TIMEOUT", "cli_timeout", 120, 5..900)
 
     # How ruby_llm executes MULTIPLE tool calls emitted in a single assistant turn:
     # :fibers (default, via async — the same reactor the workflow already fans its

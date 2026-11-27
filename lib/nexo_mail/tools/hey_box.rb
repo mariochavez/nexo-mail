@@ -7,8 +7,8 @@ module NexoMail
     # Lists HEY's boxes as compact JSON via `hey box <name> --limit N --json`. Read-only.
     #
     # ONE call returns every box. Batching here rather than making the model loop is
-    # the whole point: the model can only issue tool calls sequentially (RubyLLM's
-    # tool_concurrency is off), so four boxes used to mean four round trips — and,
+    # the whole point: one call costs the model one round trip, where a
+    # call per box used to mean four — and,
     # because NexoMail::Tools::Hey::BOXES did not agree with what this tool told the
     # model to send, three of those four silently returned the Imbox instead.
     #
@@ -85,7 +85,7 @@ module NexoMail
 
       private
 
-      # One `hey` subprocess per box, up to Config.hey_concurrency in flight. Returns
+      # One `hey` subprocess per box, one after another (see Hey::LOCK). Returns
       # [canonical_name, parsed_payload] pairs; a per-box failure is a payload with an
       # :error key, so one broken box never costs the others.
       #
@@ -95,10 +95,7 @@ module NexoMail
       # itself meant anything past the newest 40 of a box was never triaged at all.
       def fetch(names)
         per_box = Config.hey_fetch_limit.to_s
-        payloads = Pool.map(names, size: Config.hey_concurrency) do |name|
-          Hey.run("box", Hey.cli_name(name), "--limit", per_box, "--json")
-        end
-        names.zip(payloads)
+        names.map { |name| [name, Hey.run("box", Hey.cli_name(name), "--limit", per_box, "--json")] }
       end
 
       def box_result(box, data, snippet_chars, cutoff, shown)

@@ -3,7 +3,7 @@
 module NexoMail
   module Agents
     # What every agent in the pipeline shares: the :local sandbox rooted at the
-    # workspace (via cwd:), read/glob/write and nothing else, the `today` tool, the
+    # workspace (via cwd:), the file tools and nothing else, the `today` tool, the
     # user's prompt fragments, and the model injected at runtime. What an agent is
     # FOR — its skills, instructions and tools — is declared by each subclass.
     class Base < Nexo::Agent
@@ -15,24 +15,19 @@ module NexoMail
       # generated on 2026-08-20 produced a schedule of 2026-06-18 / 2026-07-17 /
       # 2026-07-23 — every appointment already past — and counted June charges as
       # current. Declared through Nexo's macro so Nexo knows the tool: under
-      # strict_tools (see CLI) a tool it did not attach is refused.
+      # Nexo's default (strict_tools) a tool it did not attach is refused.
       tools Tools::Today
 
-      # Injects the active model onto every agent class. Called by the CLI after
-      # config is loaded, before any agent is instantiated. The classes are found,
-      # not listed: every constant under Agents is loaded and each Base subclass
-      # configured, so a new agent class needs no entry anywhere.
-      def self.configure_model!(model)
-        Agents.constants.each { |name| Agents.const_get(name) }
-        [self, *descendants].each do |klass|
-          klass.model model.model
-          klass.provider model.provider.to_sym
-          klass.assume_model_exists true
-        end
-      end
+      # The model, read lazily from the one the CLI selected (NexoMail.active_model).
+      # Reader overrides of Nexo's macros, inherited by every agent class, so a new
+      # agent needs no entry anywhere and nothing is configured before config loads.
+      # The model id is taken as given (`assume_model_exists`): a local or proxied
+      # model is not in ruby_llm's registry.
+      def self.model(*) = NexoMail.active_model&.model
 
-      # Every loaded subclass, however deep.
-      def self.descendants = subclasses.flat_map { |klass| [klass, *klass.descendants] }
+      def self.provider(*) = NexoMail.active_model&.provider&.to_sym
+
+      def self.assume_model_exists(*) = !NexoMail.active_model.nil?
 
       # The prompt-fragment key (<prompts_dir>/<key>.md) appended to this agent's
       # instructions. nil on the base; concrete agents override.
