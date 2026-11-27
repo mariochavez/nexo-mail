@@ -80,11 +80,14 @@ all archived to a timestamped snapshot.
                                      mail (Ledger), then
                                      commits the merge
                     │
-              Synthesize          2. BUILD THE DIGEST   → digest.json
-                                    merge · dedupe ·       + inbox-digest.md
-                                    money roll-up ·
-                                    stories · people ·
-                                    topic briefings
+              Synthesize          2. KEEP THE DIGEST    → digest.json
+                                    full build, or an      + inbox-digest.md
+                                    update from the new
+                                    items only, or skipped
+                                    (DigestFile.plan):
+                                    merge · dedupe · money
+                                    roll-up · stories ·
+                                    people · topic briefings
                     │
               Publisher           3. RENDER             → dashboard.html
                                     runs the skill's
@@ -199,9 +202,12 @@ starting over is the wrong shape. So it isn't thrown away:
 
 ```ruby
 produced = checkpoint_all(available.transform_values { |source| -> { extract_source(source) } }).compact
-drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
-suspend!(reason: "synthesis produced no digest.json") unless File.exist?(...)
+drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp, plan))
+suspend!(reason: "the digest was not saved") unless DigestFile.committed?
 ```
+
+The test is the commit, not the file: `digest.json` survives in the workspace from
+the run before, so its existence says nothing about this one.
 
 `suspend!` leaves the run `"suspended"` — a **non-failure**, distinct from
 `"failed"` — and returns it. `nexo-triage --resume` re-enters `#call` from the top,

@@ -42,6 +42,12 @@ module NexoMail
         so they cannot disagree. Amounts are summed exactly, with no floating-point
         drift, and currencies are NEVER converted into one another.
 
+        Updating a saved digest? Pass ONLY the new payments plus `saved_since` (the
+        ISO date your window starts): the charges `digest.json` already lists from
+        that date on are counted with them, so you do not re-send them. A new payment
+        identical to a saved charge (same merchant, amount, currency, direction and
+        date) is counted once and reported under `already_counted`.
+
         Payments with an unrecognised `direction` come back under `needs_direction`
         and are NOT counted; ones with no usable amount come back under `ignored`.
         Neither is silently dropped — fix them and call again, or report them as-is.
@@ -60,6 +66,8 @@ module NexoMail
             string :source, description: "Which inbox it came from", required: false
           end
         end
+        string :saved_since, required: false,
+          description: "ISO date. Also count the charges already in digest.json dated on/after it (undated ones are kept)"
       end
 
       # Money OUT is paid + charged + due; refund is money coming back.
@@ -67,8 +75,9 @@ module NexoMail
       DIRECTIONS = (OUTFLOW + %w[refund]).freeze
       UNKNOWN_CURRENCY = "UNKNOWN"
 
-      def execute(payments:)
+      def execute(payments:, saved_since: nil)
         rows = Array(payments).map { |p| normalize(p) }
+        rows, repeated = with_saved(rows, saved_since) unless saved_since.to_s.strip.empty?
         usable, ignored = rows.partition { |r| r[:amount] }
         counted, undirected = usable.partition { |r| DIRECTIONS.include?(r[:direction]) }
 
@@ -77,12 +86,29 @@ module NexoMail
             currencies: counted.map { |r| r[:currency] }.uniq.sort,
             by_currency: by_currency(counted),
             needs_direction: undirected.map { |r| present(r).merge(reason: "direction must be one of: #{DIRECTIONS.join(", ")}") },
-            ignored: ignored.map { |r| present(r).merge(reason: "no usable amount") }
+            ignored: ignored.map { |r| present(r).merge(reason: "no usable amount") },
+            already_counted: Array(repeated).map { |r| present(r) }
           }.reject { |_, v| v == [] }
         )
       end
 
       private
+
+      # The saved digest's charges from +since+ on, then the new rows that are not
+      # one of them already. The cutoff is the caller's — this still has no idea what
+      # the window is — and "the same" means identical in every field that makes a
+      # transaction, nothing looser: whether two different-looking rows are one
+      # payment is a judgment, and stays with the skill.
+      def with_saved(rows, since)
+        cutoff = since.to_s.strip[0, 10]
+        saved = DigestFile.saved_charges.map { |charge| normalize(charge) }
+          .select { |r| r[:date].nil? || r[:date][0, 10] >= cutoff }
+        known = saved.map { |r| identity(r) }
+        fresh, repeated = rows.partition { |r| !known.include?(identity(r)) }
+        [saved + fresh, repeated]
+      end
+
+      def identity(row) = row.values_at(:merchant, :amount, :currency, :direction, :date)
 
       # Each currency is self-contained: its list, and the totals OF that list.
       def by_currency(rows)

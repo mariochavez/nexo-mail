@@ -31,6 +31,7 @@ module NexoMail
       return print_check if opts[:check]
       return prune_snapshots(opts[:prune]) if opts.key?(:prune)
       return reset_ledger if opts[:reset_ledger]
+      return rebuild_digest if opts[:rebuild_digest]
 
       configure_model!(@cli_model)
       opts[:resume] ? resume(opts[:resume]) : triage
@@ -97,6 +98,7 @@ module NexoMail
         o.on("--resume [RUN_ID]", "Resume a suspended run (default: the most recent one)") { |v| opts[:resume] = v || :last }
         o.on("--prune-snapshots [KEEP]", Integer, "Delete old run snapshots, keeping the newest KEEP (default #{Config.snapshots_keep})") { |v| opts[:prune] = v }
         o.on("--reset-ledger", "Forget which mail was already triaged; the next run reads every inbox in full") { opts[:reset_ledger] = true }
+        o.on("--rebuild-digest", "Build the digest in full on the next run instead of amending it (no mail is re-read)") { opts[:rebuild_digest] = true }
         o.on("-h", "--help", "Show help and how to configure everything") { print_help }
       end.parse!(argv)
       opts
@@ -190,7 +192,7 @@ module NexoMail
     STAGE_LABELS = {"synthesis" => "digest", "publisher" => "dashboard", "archivist" => "archive"}.freeze
 
     def report(run, total)
-      results, stages = outcomes(run)
+      results, stages, unchanged = outcomes(run)
       Sources.all.each { |descriptor| puts source_line(descriptor.name, results[descriptor.name]) }
       print_stage_breakdown(results, stages, total, run_model(run))
 
@@ -198,6 +200,10 @@ module NexoMail
       # back only to display (no parsing, no generation on the Ruby side).
       digest = read_artifact("inbox-digest.md")
       puts
+      if unchanged
+        puts "  #{dim.render("nothing new since the digest was built #{unchanged} — digest and dashboard left as they are")}"
+        puts
+      end
       if digest && !digest.strip.empty?
         puts Glamour.render_with_style(digest, Theme.glamour_style(@flavor), width: [term_width, 100].min)
       else
@@ -301,6 +307,7 @@ module NexoMail
     def outcomes(run)
       results = {}
       stages = {}
+      unchanged = nil
       calls = Hash.new(0)
       Nexo::Workflow.logs(run.id) do |ev|
         # emit() stores the data hash with the keys it was called with (symbols
@@ -313,13 +320,14 @@ module NexoMail
         when "source_done" then results[d[:source]] = {state: :ok, ms: d[:ms]}
         when "source_failed" then results[d[:source]] = {state: :failed, ms: d[:ms], detail: d[:error]}
         when "source_skipped" then results[d[:source]] = {state: :skipped, detail: d[:reason]}
+        when "digest_current" then unchanged = d[:built_on] || "earlier"
         when /\A(synthesis|publisher|archivist)_(done|failed)\z/
           stages[$1] = {state: ($2 == "done") ? :ok : :failed, ms: d[:ms], detail: d[:error]}
         end
       end
       results.each { |name, r| r[:calls] = calls[name] }
       stages.each { |name, r| r[:calls] = calls[name] }
-      [results, stages]
+      [results, stages, unchanged]
     end
 
     def source_line(name, r)
@@ -410,9 +418,24 @@ module NexoMail
       puts header.render("Nexo Mail Agent — ledger")
       puts "  #{dim.render("dir: #{Ledger.dir}")}"
       removed = Ledger.reset!
+      DigestFile.forget!
       puts
       puts "  #{brand.render("removed".ljust(9))} #{removed.empty? ? dim.render("none") : bad.render(removed.map { |p| File.basename(p, ".json") }.join(", "))}"
-      note "the next run reads every inbox in full"
+      note "the next run reads every inbox in full and rebuilds the digest"
+      puts
+      exit 0
+    end
+
+    # ---- --rebuild-digest ---------------------------------------------------
+
+    # Drop the record that a digest was built, nothing else: the items stay on the
+    # ledgers, so the next run reads only new mail and rebuilds the digest from all
+    # of it. For after editing the synthesis skill, when the saved digest was
+    # written under the old rules.
+    def rebuild_digest
+      puts header.render("Nexo Mail Agent — digest")
+      DigestFile.forget!
+      note "the next run builds the digest in full from the items on record (no mail is re-read)"
       puts
       exit 0
     end
@@ -468,6 +491,7 @@ module NexoMail
       line "    --resume [RUN_ID]     Continue a paused run (default: the most recent) without re-reading the inboxes"
       line "    --prune-snapshots [N] Prune run snapshots, keeping the newest N (default #{Config.snapshots_keep})"
       line "    --reset-ledger        Forget which mail was already triaged (next run is a full read)"
+      line "    --rebuild-digest      Build the digest in full on the next run (no mail is re-read)"
       line "-h, --help                This help"
 
       section "CONFIG — #{Config.config_file}"

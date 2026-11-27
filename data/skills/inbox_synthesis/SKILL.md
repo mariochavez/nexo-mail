@@ -1,19 +1,29 @@
 ---
 name: inbox_synthesis
-description: Build the digest. Read the per-source extraction files from the workspace, merge and de-duplicate them into one picture, roll up the money, order the schedule, narrate the stories and people, and WRITE two files — digest.json (the canonical data) and inbox-digest.md (a short terminal digest). This is where the whole inbox becomes one briefing.
+description: Keep the digest. Build it in full from the per-source extraction files, or update the saved one with only the mail triaged since — merge and de-duplicate into one picture, roll up the money, order the schedule, narrate the stories and people. Write the digest keys to digest.update.json and save them with commit_digest, then write inbox-digest.md (a short terminal digest). This is where the whole inbox becomes one briefing.
 ---
 
 # Inbox Synthesis — build the digest
 
-Each source agent has written its extraction to the workspace as JSON
+Each source agent has extracted its inbox into the workspace as JSON
 (`apple-mail.json`, `gmail.json`, `hey.json` — whichever sources ran). Your job
-is to turn those into ONE picture and write two files with the write tool:
+is to keep ONE picture of them, in two files:
 
-1. `digest.json` — the canonical data (schema below).
-2. `inbox-digest.md` — a short markdown digest for the terminal.
+1. `digest.json` — the canonical data (schema below). **You never write this file
+   directly.** You write the top-level keys you built or changed to
+   `digest.update.json` and call `commit_digest`, which replaces exactly those keys
+   and keeps every other one as it was.
+2. `inbox-digest.md` — a short markdown digest for the terminal, written with the
+   write tool.
 
-Then confirm in one line. Read the source files with your read/glob tools; the
-prompt tells you which exist and gives you the run timestamp to stamp in.
+Then confirm in one line. The prompt gives you the run timestamp to stamp in and
+tells you which of two runs this is:
+
+- **FULL build** — there is no digest yet. Read every extraction file the prompt
+  names, follow sections 0–5, and put the WHOLE digest in `digest.update.json`.
+- **UPDATE** — a digest was saved by an earlier run and most of it is still true.
+  Follow [Updating a saved digest](#updating-a-saved-digest) below: you are handed
+  only the new mail and you rewrite only the sections it changes.
 
 ## 0. First: what day is it, and what window are we covering
 
@@ -113,6 +123,76 @@ That's the amount/time view, not a duplicate.
 When two messages are genuinely the same thread across sources, you already
 merged them in step 1 — keep the strongest bucket and both `sources`.
 
+## Updating a saved digest
+
+An update exists so that three new messages cost three messages' worth of work.
+Do not re-read the extraction files and do not re-emit sections that did not change.
+
+1. Call `Today`, then `new_items` — it returns every item triaged since the digest
+   was saved, each labelled with its `source`. Then read `digest.json` once.
+2. **Place each new item**, by the same rules as a full build (sections 1 and 5):
+   - Its `id` matches a card already in the digest → the thread moved. Replace that
+     card with the new item; do not add a second one. If the move settles it (the
+     reply arrived, the bill was paid), it may change bucket or drop out.
+   - Otherwise it is new: `noise` only raises `counts.noise`; anything else goes on
+     the one surface it is strongest on. A newsletter folds into its topic briefing;
+     a message that continues a story extends that story.
+3. **Roll the digest forward to today**, even when `new_items` is empty:
+   - drop `schedule` entries whose `start` is before `today`;
+   - drop cards, charges and briefing material dated before `window_start`. The
+     window moves when a new month begins — that run drops a lot, and it is correct.
+4. **Money only when money changed.** If a new item carries a `payment`, or the
+   window moved, call `SumPayments` ONCE with ONLY the new payments and
+   `saved_since` set to `window_start`. The tool adds the charges the digest
+   already lists from that date on, so you never re-send them and never go looking
+   for them in the extraction files. Replace `finance` with what it returns (same
+   rules as section 2). A new payment that is the same transaction as a saved
+   charge under a different wording must be left out — the tool only recognises
+   exact repeats. With no new payment and no moved window, leave `finance` out.
+5. **Write `digest.update.json`** — as little as says what changed. A key you
+   leave out is kept untouched, so never include a section just to repeat it.
+   - **Lists change one entry at a time, under `edit`.** Do NOT re-write `action`,
+     `fyi`, `stories`, `people` or `topics` to add, replace or remove an entry:
+
+     ```json
+     "edit": {
+       "action": { "put": [ { "id": "…", "…": "the complete card" } ], "drop": ["<id>"] },
+       "topics": { "put": [ { "topic": "ruby", "…": "the complete briefing" } ] }
+     }
+     ```
+
+     `put` replaces the entry with the same identity where it stands, or adds it at
+     the top; `drop` removes by identity. The identity is `id` for `action`/`fyi`,
+     `title` for `stories`, `name` for `people`, `topic` for `topics`. A card that
+     changes bucket is a `drop` from one list and a `put` into the other.
+   - Everything else is replaced whole, as a top-level key: always `generated_at`
+     (the timestamp from the prompt); `counts` whenever a list or the noise tally
+     changed; `headline` when the shape of the inbox did; `sources` / `skipped`
+     when the inboxes that ran differ; `finance` and `schedule` when they changed.
+   - If nothing changed but the day, the update is just `generated_at` and
+     `schedule` if you pruned it.
+6. Call `commit_digest`. It returns how long each list is as saved beside your
+   `counts`; if they disagree, write a `digest.update.json` holding only the
+   corrected `counts` and call it again.
+7. Rewrite `inbox-digest.md` to match the digest as it now stands.
+
+An example — a reply in a thread that is already an action card, a new FYI, and a
+Ruby newsletter:
+
+```json
+{
+  "generated_at": "2026-11-28T15:02:00Z",
+  "counts": { "action": 11, "fyi": 15, "noise": 55, "total": 81 },
+  "edit": {
+    "action": { "put": [ { "id": "1288908389", "sender": "…", "subject": "…", "summary": "where the thread stands now", "…": "…" } ] },
+    "fyi": { "put": [ { "id": "1290400001", "sender": "…", "subject": "…", "summary": "…", "…": "…" } ] },
+    "topics": { "put": [ { "topic": "ruby", "label": "Ruby", "headline": "…", "bullets": ["…"], "briefing": "…", "count": 7 } ] }
+  }
+}
+```
+
+`stories`, `people`, `finance` and `schedule` are absent because they did not change.
+
 ## Counts must equal the lists they describe
 
 `counts.action` MUST equal the number of entries in `action`, and `counts.fyi` MUST
@@ -132,6 +212,9 @@ counting as action, emit it; if it is not worth emitting, do not count it.
 
 ## digest.json schema
 
+On a full build `digest.update.json` holds all of this; on an update, only the
+top-level keys that changed.
+
 ```json
 {
   "generated_at": "<the timestamp from the prompt, verbatim>",
@@ -140,7 +223,7 @@ counting as action, emit it; if it is not worth emitting, do not count it.
   "skipped": { "Apple Mail": "reason it was skipped" },
   "counts": { "action": 0, "fyi": 0, "noise": 0, "total": 0 },
   "action": [
-    { "sender": "", "sender_email": "", "subject": "", "summary": "",
+    { "id": "", "sender": "", "sender_email": "", "subject": "", "summary": "",
       "category": "", "received_at": "", "topics": [], "sources": ["Gmail"] }
   ],
   "fyi": [ "...same shape as action..." ],
@@ -183,6 +266,8 @@ Rules for the data:
 - Any array may be empty. Leave a section empty rather than inventing content.
 - Never invent a message, person, amount, or event not present in the sources.
 - `generated_at` is the timestamp handed to you — don't guess the time.
+- `id` is the extraction item's own `id`, carried through unchanged. It is how a
+  later update recognises that a thread it is handed is already a card.
 
 ## 2. inbox-digest.md
 
@@ -215,4 +300,5 @@ _<n> noise skipped · sources: <…> · <skipped notes>_
 
 Omit any section with nothing in it. Keep each line to one sentence.
 
-Write both files once, then confirm in one line.
+Write `digest.update.json`, call `commit_digest`, write `inbox-digest.md`, then
+confirm in one line.

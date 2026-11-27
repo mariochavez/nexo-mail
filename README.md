@@ -69,6 +69,7 @@ nexo-triage                 # triage all configured sources → digest
 nexo-triage --check         # preflight: which model + services are ready
 nexo-triage --resume        # continue a paused run without re-reading the inboxes
 nexo-triage --reset-ledger  # forget which mail was triaged; the next run reads everything
+nexo-triage --rebuild-digest # build the digest in full next run (no mail is re-read)
 nexo-triage --model cloud   # pick a configured model by alias
 nexo-triage --theme latte   # override the theme for this run
 RUBYLLM_WIRE=1 nexo-triage   # show the raw ruby_llm/MCP logs
@@ -89,6 +90,12 @@ Each message is triaged **once**. Every inbox keeps a ledger under
 arrived since the last one — plus any thread that has moved — and merges it into
 what was extracted before. A run that dies before it commits marks nothing as read.
 `--reset-ledger` starts over.
+
+The digest is kept the same way. A run hands the digest agent only the items triaged
+since the digest was last saved, and it rewrites just the entries and sections they
+touch; with nothing new and a digest already built today, the run stops after the
+inboxes (about 14 seconds). `--rebuild-digest` forces a full build on the next run
+without re-reading any mail — use it after editing the `inbox_synthesis` skill.
 
 A run that reads every inbox and then fails to build the digest **pauses** rather
 than dying: the extraction is checkpointed, so `--resume` picks up at synthesis

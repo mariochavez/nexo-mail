@@ -9,7 +9,9 @@ module NexoMail
     #
     # Pipeline:
     #   1. source agents (parallel)  → apple-mail.json / gmail.json / hey.json
-    #   2. synthesize agent          → digest.json + inbox-digest.md
+    #   2. synthesize agent          → digest.json + inbox-digest.md — built in
+    #                                    full, amended with the new items, or not
+    #                                    run at all (DigestFile.plan)
     #   3. publisher agent           → dashboard.html
     #   4. archivist agent           → snapshot + prune (via tools)
     #
@@ -41,12 +43,29 @@ module NexoMail
         produced = checkpoint_all(available.transform_values { |source| -> { extract_source(source) } }).compact
         return {sources: [], skipped: skipped, files: []} if produced.empty?
 
-        drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
-        # A run that read every inbox and then failed to build the digest is worth
-        # pausing rather than burying: "suspended" is a non-failure the CLI can offer
-        # to resume, and resuming skips straight back to synthesis. Outside the
-        # checkpoint, which is where suspend! belongs.
-        suspend!(reason: "synthesis produced no #{DIGEST}") unless File.exist?(File.join(Config.sandbox_dir, DIGEST))
+        # Decided only now: the inboxes' commits are what say how much is waiting.
+        # Which agents run is the one decision this class exists to make, and with
+        # nothing new and a digest built today the answer is none of them.
+        plan = DigestFile.plan!
+        emit(:digest_plan, plan: plan, pending: DigestFile.pending)
+        if plan == :current && File.exist?(File.join(Config.sandbox_dir, DASHBOARD))
+          emit(:digest_current, built_on: DigestFile.built_on)
+          return {sources: produced.keys, skipped: skipped, files: produced.values, unchanged: true,
+                  snapshot: Snapshots.list.first}
+        end
+
+        unless plan == :current
+          DigestFile.clear
+          drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp, plan), max_turns: SYNTHESIS_TURNS.fetch(plan))
+          # A run that read every inbox and then failed to save the digest is worth
+          # pausing rather than burying: "suspended" is a non-failure the CLI can
+          # offer to resume, and resuming skips straight back to synthesis. The
+          # commit, not the file — `digest.json` survives from the run before, which
+          # is how a failed synthesis used to pass for a finished one. The items it
+          # was handed stay pending, so the resume is handed them again. Outside the
+          # checkpoint, which is where suspend! belongs.
+          suspend!(reason: "the digest was not saved") unless DigestFile.committed?
+        end
         drive_agent(Agents::Publisher, "publisher") { |agent| publisher_prompt(agent) }
         drive_agent(Agents::Archivist, "archivist", archivist_prompt)
 
@@ -105,14 +124,14 @@ module NexoMail
       # publisher needs the latter, because it stages the skill's files into that
       # agent's own sandbox before telling it what to run. A nil prompt means the
       # stage declined and already emitted why.
-      def drive_agent(klass, tag, prompt = nil)
+      def drive_agent(klass, tag, prompt = nil, max_turns: 20)
         started = clock
         emit(:"#{tag}_started")
         agent = klass.new(cwd: Config.sandbox_dir)
         text = block_given? ? yield(agent) : prompt
         return if text.nil?
 
-        agent.prompt(text, max_turns: 20) { |type, payload| forward_event(tag, type, payload) }
+        agent.prompt(text, max_turns: max_turns) { |type, payload| forward_event(tag, type, payload) }
         emit(:"#{tag}_done", ms: ms_since(started))
       rescue Nexo::EnvironmentError => e
         # The agent declared what its sandbox must provide (`requires`) and the
@@ -131,8 +150,14 @@ module NexoMail
 
       # ---- artifacts (nexo_ai >= 0.9) -------------------------------------------
 
-      # The one input the render stage needs, and the pipeline's canonical artifact.
-      DIGEST = "digest.json"
+      # What the Publisher renders. With nothing new to brief, its presence is what
+      # lets the run stop after the inboxes.
+      DASHBOARD = "dashboard.html"
+
+      # Tool rounds the digest builder gets. A full build reads every extraction file
+      # and writes every section, and spent all 20 it used to have on a 212-item
+      # seed; an update reads one file and writes a few keys.
+      SYNTHESIS_TURNS = {full: 30, update: 20}.freeze
 
       # Copy the agent's DECLARED outputs (`produces`) onto the run record. Nexo
       # reads each name through this workflow's sandbox — the workspace every agent
@@ -159,11 +184,20 @@ module NexoMail
         emit(:artifact_skipped, file: file, error: e.message)
       end
 
-      def synthesis_prompt(produced, stamp)
+      def synthesis_prompt(produced, stamp, plan)
         files = produced.values.map { |f| "`#{f}`" }.join(", ")
-        "The per-source extraction files in the workspace are: #{files}. The run " \
-          "timestamp is #{stamp.iso8601} (display: #{stamp.strftime("%A, %-d %B %Y · %H:%M UTC")}). " \
-          "Build the digest per the skill: write `digest.json` and `inbox-digest.md`."
+        timestamp = "The run timestamp is #{stamp.iso8601} (display: #{stamp.strftime("%A, %-d %B %Y · %H:%M UTC")})."
+        if plan == :full
+          "This is a FULL build. The per-source extraction files in the workspace are: " \
+            "#{files}. #{timestamp} Build the whole digest per the skill: write it to " \
+            "`#{DigestFile::UPDATE}`, call commit_digest, then write `inbox-digest.md`."
+        else
+          "This is an UPDATE: `#{DigestFile::FILE}` holds the digest an earlier run saved. " \
+            "#{timestamp} Update it per the skill: call new_items for the mail triaged " \
+            "since, write only the top-level keys that change to `#{DigestFile::UPDATE}`, " \
+            "call commit_digest, then rewrite `inbox-digest.md`. Work from new_items and " \
+            "`#{DigestFile::FILE}` alone — do not re-read the extraction files."
+        end
       end
 
       # Stages the Publisher's skill resources INTO the sandbox, then builds the

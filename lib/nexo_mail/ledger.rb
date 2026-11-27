@@ -14,6 +14,8 @@ module NexoMail
   #          including the ones the agent judged noise and never emitted. This is
   #          what the listing tools filter against.
   #   items  id => the extraction item the agent wrote for it.
+  #   pending  the ids of items no committed DIGEST has taken in yet — what lets the
+  #          digest be updated with the new mail instead of rebuilt from all of it.
   #
   # Pure bookkeeping, like Snapshots: it holds no opinion about what mail matters,
   # how far back a briefing reaches, or what an item should say. Those stay in the
@@ -43,6 +45,9 @@ module NexoMail
       # merges them into the full extraction file ("hey.json" → "hey.new.json").
       def inbox_file(file) = File.basename(file.to_s, ".json") + INBOX_SUFFIX
 
+      # Every source's ledger, whether or not that source ran this time.
+      def all = Sources.all.map { |source| for_file(source.file) }
+
       def dir = Config.ledger_dir
 
       # Forget everything: every source is read in full on the next run.
@@ -59,6 +64,7 @@ module NexoMail
     def initialize(key)
       @key = key
       @offered = {}
+      @handed = []
       @committed = false
       load
     end
@@ -96,7 +102,13 @@ module NexoMail
     # the items to brief from: everything kept, newest first, optionally only those
     # received on/after +keep_since+ (an ISO date — the caller's window, not ours).
     def commit(items, keep_since: nil)
-      Array(items).each { |item| @items[item_key(item)] = item if item.is_a?(Hash) }
+      Array(items).each do |item|
+        next unless item.is_a?(Hash)
+
+        key = item_key(item)
+        @items[key] = item
+        @pending |= [key]
+      end
       @seen.merge!(@offered)
       @offered = {}
       @committed = true
@@ -107,6 +119,28 @@ module NexoMail
     # True once #commit ran in this process — how the workflow knows a source's
     # extraction file is this run's and not one a previous run left behind.
     def committed? = @committed
+
+    # The same two-step as #take and #commit, one stage later: #take_pending hands
+    # the digest builder the items no digest holds yet and remembers them in memory;
+    # #digested! is what strikes them off. A digest that is never committed leaves
+    # them pending, so the next run hands them over again.
+    def take_pending
+      @handed = @pending.dup
+      @items.values_at(*@handed).compact
+    end
+
+    def pending_count = @pending.size
+
+    # +all+ is for a digest rebuilt from the full extraction files, which by
+    # construction holds everything on record.
+    def digested!(all: false)
+      gone = all ? @pending : @handed
+      @handed = []
+      return if gone.empty?
+
+      @pending -= gone
+      save
+    end
 
     def size = @items.size
 
@@ -140,12 +174,14 @@ module NexoMail
       @scope = data["scope"]
       @seen = data["seen"].is_a?(Hash) ? data["seen"] : {}
       @items = data["items"].is_a?(Hash) ? data["items"] : {}
+      @pending = data["pending"].is_a?(Array) ? data["pending"] : []
     rescue JSON::ParserError
       # A ledger we cannot read is a ledger we do not have: read everything again
       # rather than refuse to run.
       @scope = nil
       @seen = {}
       @items = {}
+      @pending = []
     end
 
     # Written whole and renamed into place, so an interrupted write cannot leave a
@@ -153,7 +189,7 @@ module NexoMail
     def save
       FileUtils.mkdir_p(self.class.dir)
       tmp = "#{path}.tmp"
-      File.write(tmp, JSON.generate("version" => VERSION, "scope" => @scope, "seen" => @seen, "items" => @items))
+      File.write(tmp, JSON.generate("version" => VERSION, "scope" => @scope, "seen" => @seen, "items" => @items, "pending" => @pending))
       File.rename(tmp, path)
     end
   end
