@@ -173,6 +173,10 @@ module NexoMail
     # (a hard cap on tool rounds since nexo_ai 0.13) bounds how many calls there are.
     # Every value is clamped so a bad TOML entry cannot spawn 200 threads or
     # flood the context.
+    # Past this many items waiting, amending the digest stops being cheaper than
+    # building it: the run rebuilds it in full from the extraction files instead.
+    def digest_rebuild_over = read_int("NEXO_MAIL_DIGEST_REBUILD_OVER", "digest_rebuild_over", 60, 1..500)
+
     def gmail_list_limit = read_int("NEXO_MAIL_GMAIL_LIST_LIMIT", "gmail_list_limit", 40, 1..200)
 
     def gmail_snippet_chars = read_int("NEXO_MAIL_GMAIL_SNIPPET_CHARS", "gmail_snippet_chars", 400, 0..2_000)

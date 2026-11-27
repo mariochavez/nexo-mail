@@ -25,6 +25,7 @@ exe/nexo-triage --help               # config + per-service setup docs
 exe/nexo-triage                      # run a triage (needs a model + services)
 exe/nexo-triage --prune-snapshots 20 # agent-driven prune, keep newest 20
 exe/nexo-triage --reset-ledger       # forget what was triaged; next run is a full read
+exe/nexo-triage --rebuild-digest     # next run builds the digest in full (no mail re-read)
 RUBYLLM_WIRE=1 exe/nexo-triage       # show raw ruby_llm/MCP logs
 gem build nexo_mail.gemspec           # package (data/** must be included)
 bundle exec standardrb lib            # lint (Standard); --fix to autofix
@@ -48,6 +49,7 @@ lib/nexo_mail/
   cli.rb                    # NexoMail::CLI — the runner (OptionParser + UI, thin)
   snapshots.rb              # NexoMail::Snapshots — create/list/prune (used by tools)
   ledger.rb                 # NexoMail::Ledger — what each inbox already triaged (used by tools)
+  digest_file.rb            # NexoMail::DigestFile — full/update/current plan + key-level commit
   sources.rb                # NexoMail::Sources — the source catalog (descriptors)
   agents/                   # SourceAgent base + EmailSource (data-driven, tool-based
                             #   Gmail/HEY) + AppleMailSource (MCP), Synthesize (digest),
@@ -56,7 +58,9 @@ lib/nexo_mail/
                             #   Today, SumPayments (deterministic primitives),
                             #   GmailImap(::List/::Read/::Mime/::BodyPart),
                             #   ArchiveRun, PruneSnapshots, CommitExtraction (ledger merge),
-                            #   UnseenOnly (ledger filter around an MCP listing)
+                            #   UnseenOnly (ledger filter around an MCP listing),
+                            #   NewItems (items no digest holds yet), CommitDigest
+                            #   (replace digest keys / put+drop list entries)
   workflows/                # MultiInboxTriage < Nexo::Workflow (orchestration only)
 data/                       # PACKAGED: config.example.toml, skills/, themes/, prompts/
   skills/                   # email_triage, financial_summary, interest_radar (extract),
@@ -75,7 +79,9 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
    Tool-based sources (Gmail, HEY) share ONE `Agents::EmailSource` built from a
    descriptor; adding such a service is a descriptor, not a class. Apple Mail keeps
    its own `AppleMailSource` because its `mcp` macro is class-level.
-2. **Synthesize** reads those files → writes `digest.json` + `inbox-digest.md`:
+2. **Synthesize** keeps `digest.json` + `inbox-digest.md` — a FULL build from those
+   files, an UPDATE from only the items triaged since, or not run at all
+   (`DigestFile.plan`):
    merge, **cross-source dedupe**, money rollups, schedule, stories, per-person
    detail, topic briefings. Skills: `inbox_synthesis`, `financial_summary`,
    `interest_radar`.
@@ -343,8 +349,7 @@ parses no JSON, renders nothing.
   went from 7m32s (HEY, 12 calls) + 2m27s (Apple Mail) to 7.3s + 6.5s, each agent
   listing zero messages, writing `[]` and committing. `--reset-ledger` forgets
   everything (use it after changing a triage skill, when old items should be judged
-  again). The cost that remains is Synthesize, which still rebuilds the whole digest
-  from every item on every run (9m09s and all 20 of its rounds on a 212-item seed).
+  again).
   Two traps this exposed: (1) **the workflow deletes `<source>.json` before the source
   agent runs** (`CommitExtraction.clear`) — left in place, an agent reads the previous
   run's copy, takes it for "what is already on record", and trims its output to match
@@ -352,6 +357,34 @@ parses no JSON, renders nothing.
   memory, which is how Apple Mail showed 45 items from an inbox holding 11 in window.
   (2) the file is written **one item per line**, not pretty-printed — the read tool
   is line-windowed and 204 pretty items were 2,927 lines.
+- **The digest is KEPT, not rebuilt — `NexoMail::DigestFile` decides which run this
+  is.** After the inboxes commit, the workflow calls `DigestFile.plan!`: **`:full`**
+  (no `digest.state` beside the ledgers, or more than `Config.digest_rebuild_over`
+  items waiting — default 60), **`:update`**, or **`:current`** (nothing waiting and
+  the digest was built today → Synthesize, Publisher and Archivist do not run at
+  all). Each ledger keeps a `pending` list: `Ledger#commit` adds the item keys,
+  `Tools::NewItems` hands them to the builder (`take_pending`, remembered in memory),
+  and only `Tools::CommitDigest` strikes them off — the ledger's own two-step, one
+  stage later, so a failed synthesis leaves them pending. **The model never writes
+  `digest.json`.** It writes `digest.update.json` — top-level keys to replace whole,
+  plus an `edit` key that puts/drops single entries of `action`/`fyi` (by `id`),
+  `stories` (`title`), `people` (`name`), `topics` (`topic`) — and calls
+  `commit_digest`. `DigestFile` replaces exactly that, never looks at content, and
+  reports list lengths beside the stated `counts`. The workflow suspends unless
+  `DigestFile.committed?` — NOT on the file's existence, which is how a failed
+  synthesis used to pass as done behind the previous run's `digest.json`.
+  `Tools::SumPayments(saved_since:)` counts the charges the saved digest already
+  lists (exact repeats reported under `already_counted`), so an update sends only
+  the new payments. `--rebuild-digest` deletes `digest.state`; `--reset-ledger` does
+  too. Measured on one day's real mail: full build 4m17s / 11 calls (96 items); an
+  update with 1 new item 49s; with 6 new items, two carrying payments, 2m26s; nothing
+  new 14s for the whole run. What was learned getting there: replacing whole lists
+  made an update write 13KB to place five items (2m36s) — hence `edit`; and one
+  pending payment sent the builder back through every extraction file to re-send all
+  the charges (3m11s) — hence `saved_since`. What remains is model thinking time,
+  not bytes. The seed-once gotcha applies: `inbox_synthesis` must be copied over an
+  existing install, or the agent follows the old skill and writes `digest.json`
+  directly (which then never commits, and the run suspends).
 - **Snapshots live in `Config.snapshots_dir`** (state), separate from the sandbox.
   Because the sandbox is fenced, agents reach snapshots ONLY via the `ArchiveRun` /
   `PruneSnapshots` tools. Each run archives `digest.json` + `dashboard.html` +

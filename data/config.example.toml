@@ -66,6 +66,12 @@ flavor = "mocha"
 # `nexo-triage --reset-ledger` forgets it all and makes the next run a full re-read.
 # ledger_dir = "${XDG_STATE_HOME:-~/.local/state}/nexo-mail/ledger"
 
+# The digest is kept, not rebuilt: a run hands the digest agent only the items
+# triaged since the digest was last saved, and it rewrites just the sections they
+# touch. With nothing new and a digest already built today, the run stops after the
+# inboxes. `nexo-triage --rebuild-digest` forces the next run to build it in full
+# (no mail is re-read) — use it after editing the inbox_synthesis skill.
+
 # ── Dashboard ───────────────────────────────────────────────────────────────
 # The Publisher renders dashboard.html from a template + a render script. Both are
 # AUTO-RESOLVED from the skill the Publisher declares — ruby_llm-skills finds that
@@ -111,6 +117,8 @@ flavor = "mocha"
 # hey_thread_max_ids    = 15      # ids one batched thread read accepts  (1..50)
 # hey_body_chars        = 4000    # body chars per HEY thread entry      (200..20000)
 # hey_payload_max_chars = 40000   # ceiling on a whole thread-read reply (4000..200000)
+# digest_rebuild_over   = 60      # new items past which the digest is rebuilt
+#                                 # in full instead of amended         (1..500)
 # hey_concurrency       = 1       # `hey` fan-out tasks per tool call (1..8)
 #                                 # Leave at 1: `hey` cannot run concurrently (it
 #                                 # races on the macOS keyring), so nexo_mail holds
