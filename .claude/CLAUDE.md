@@ -154,8 +154,12 @@ parses no JSON, renders nothing.
   (`CLI#trim_runs` keeps `Config.runs_keep`).
 - **The Publisher's sandbox is CONFIG-DRIVEN and Nexo owns it.**
   `Agents::Publisher.sandbox` is a lazy READER override returning `:local` or a
-  container options Hash from `[dashboard] sandbox` / `image` (local|docker|apple,
-  default local). Because the agent RESOLVES it rather than being handed one, Nexo
+  container options Hash from `[dashboard] sandbox` / `image`
+  (local|confined|docker|apple, default local). `confined` is still a `Sandboxes::Local`
+  on the shared workspace (so `shares_workspace?` holds) with `isolation: :confined`
+  and `readable: [Config.dashboard_ruby_prefix]` — without that grant ruby starts but
+  cannot load its stdlib. `Config.dashboard_containerized?` is true ONLY for
+  docker/apple. Because the agent RESOLVES it rather than being handed one, Nexo
   also closes it in `Agent#close` — never inject via `new(sandbox:)` here, that makes
   it borrowed and you own the teardown (a leaked container per run). The container is
   `network: :none` + cap-drop + read-only rootfs; `readonly_rootfs` is forced FALSE
@@ -188,10 +192,15 @@ parses no JSON, renders nothing.
   tool-based *source* adds only a `Sources` descriptor — no class, so the roster
   stays fixed; a new agent class (or an MCP source like Apple Mail) still needs a
   roster entry.
-- **Custom `source_tools` are NOT gated by Nexo permissions** (only the built-in
-  sandbox tools + MCP allow-list are). `HeyBox`, `GmailImap`, `ArchiveRun`,
-  `PruneSnapshots` run as plain `RubyLLM::Tool`s — their safety is your job
-  (read-only mail by construction; `PruneSnapshots` bounded to `Config.snapshots_dir`).
+- **Host tools are declared with Nexo's `tools` macro (nexo_ai >= 0.14), never by
+  calling `with_tools` in `#chat`.** `SourceAgent` declares `Tools::Today` for everyone;
+  `Synthesize` adds `SumPayments`; `EmailSource` adds a lambda reading its descriptor;
+  `Archivist` declares `ArchiveRun`/`PruneSnapshots` with `capability: :write`, which
+  wraps them in `Nexo::GatedTool` (allowed because the shared permissions grant
+  `:write`). The mail-reading tools carry no capability — read-only by construction.
+  The CLI sets `Nexo.config.strict_tools = true`: a tool attached any other way is
+  REFUSED ("did not run"), so a new tool that is not declared silently does nothing.
+  The old `source_tools`/`common_tools` hooks are gone.
 - **Per-agent prompt fragments**: `SourceAgent#chat` appends `common.md` +
   `<prompt_key>.md` from `Config.prompts_dir` when present. Each source defines
   `self.prompt_key`.
@@ -371,7 +380,8 @@ parses no JSON, renders nothing.
 
 ## Dependencies
 
-`nexo_ai ~>0.13` (which brings `ruby_llm ~>2.2`, MCP included), `zeitwerk`,
+`nexo_ai ~>0.14` (which brings `ruby_llm ~>2.2`, MCP included), `mxc` (the OS
+sandbox behind `[dashboard] sandbox = "confined"`), `zeitwerk`,
 `net-imap`, `toml-rb`, `bigdecimal`, `async ~>2.0`, `lipgloss`, `glamour`. Requires
 Ruby **3.3+**. Do NOT add `ruby_llm-mcp` or `ruby_llm-skills`: the first defines the
 same `RubyLLM::MCP` constant as ruby_llm 2.x and both pin ruby_llm 1.x.

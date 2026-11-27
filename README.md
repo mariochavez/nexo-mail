@@ -114,9 +114,17 @@ though it resolves in your terminal. If it doesn't, preflight says so and you pi
 - **Least privilege.** Every agent runs under `:read_only` with only `:read/:glob/:write`.
   The Publisher alone also gets `:shell`, purely to run the bundled render script; it
   attaches no mail tools at all.
-- **That one shell can leave the host.** `[dashboard] sandbox = "docker"` renders the
-  dashboard inside a throwaway container — no network, dropped capabilities, read-only
-  rootfs — with `image` picking the interpreter. `--check` probes whichever you choose.
+- **That one shell can be fenced, or leave the host.** `[dashboard] sandbox = "confined"`
+  keeps the shared workspace and runs the render command inside an OS sandbox (Seatbelt
+  on macOS, Bubblewrap on Linux): it can write only inside the workspace, cannot read
+  your home directory, and has no network. `[dashboard] sandbox = "docker"` renders
+  inside a throwaway container instead — no network, dropped capabilities, read-only
+  rootfs — with `image` picking the interpreter. The default, `"local"`, is unfenced,
+  and `--check` says so. `--check` probes whichever you choose.
+- **No tool runs unseen.** Every tool an agent can call is one Nexo attached or one
+  declared with its `tools` macro (`strict_tools`); anything else is refused. The two
+  tools that change files on the host, `ArchiveRun` and `PruneSnapshots`, are declared
+  as `:write`, so the agent's permissions decide each call.
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design.
 

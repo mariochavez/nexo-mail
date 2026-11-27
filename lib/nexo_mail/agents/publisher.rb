@@ -26,17 +26,29 @@ module NexoMail
       # network, so it is the single stage that can be moved off the host entirely:
       # `[dashboard] sandbox = "docker"` puts it in a throwaway container with no
       # network, dropped capabilities and a read-only rootfs over an ephemeral
-      # scratch. "local" (the default) keeps it in the shared workspace.
+      # scratch. "confined" keeps the shared workspace and fences the shell with an
+      # OS sandbox. "local" (the default) keeps it in the shared workspace, unfenced.
       #
       # A lazy READER override, like .requires above: Config is not loaded until
       # CLI.run, and Nexo resolves the sandbox on first touch. Because the agent
       # resolves this itself rather than being handed one, Nexo also OWNS it and
       # closes it in #close — no teardown code here, and no leaked container.
       def self.sandbox
+        return confined_sandbox if Config.dashboard_sandbox == "confined"
         return :local unless Config.dashboard_containerized?
 
         {type: Config.dashboard_sandbox.to_sym, image: Config.dashboard_image,
          network: :none, readonly_rootfs: Config.dashboard_sandbox != "apple"}
+      end
+
+      # `[dashboard] sandbox = "confined"`: still the shared workspace, but the shell
+      # runs inside an OS sandbox (nexo_ai >= 0.14, through the mxc gem). The render
+      # command can write only inside the workspace, cannot read the home directory
+      # and has no network. A confined command cannot read outside the workspace
+      # either, so the interpreter's own install is granted read-only — without it
+      # ruby starts and then cannot load its standard library.
+      def self.confined_sandbox
+        {type: :local, isolation: :confined, readable: [Config.dashboard_ruby_prefix].compact}
       end
 
       def self.prompt_key = "publisher"
