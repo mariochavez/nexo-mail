@@ -68,13 +68,16 @@ module NexoMail
         end
       end
 
-      # Attach the source's tools and append user prompt fragments on top of Nexo's
-      # normal wiring (super applies instructions + skill; with_tools/with_instructions
-      # are additive). A `common` fragment applies to every agent, plus a per-agent one.
+      # The source's own tools plus the common ones, declared through Nexo's `tools`
+      # macro so Nexo knows about them (nexo_ai >= 0.14 refuses an undeclared tool
+      # under strict_tools). A lambda, because EmailSource's tools come from its
+      # per-instance descriptor.
+      tools ->(agent) { (agent.source_tools + agent.class.common_tools).uniq }
+
+      # Append user prompt fragments on top of Nexo's normal wiring (with_instructions
+      # is additive). A `common` fragment applies to every agent, plus a per-agent one.
       def chat(base: nil)
         chat = super
-        tools = (source_tools + self.class.common_tools).uniq.map(&:new)
-        chat.with_tools(*tools) unless tools.empty?
         [Config.prompt_fragment("common"), Config.prompt_fragment(prompt_key)]
           .compact.each { |fragment| chat.with_instructions(fragment, append: true) }
         chat

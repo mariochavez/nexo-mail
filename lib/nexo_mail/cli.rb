@@ -80,6 +80,9 @@ module NexoMail
         # from the run store, and Nexo's default one is in-memory. One line makes
         # `--resume` possible at all.
         c.run_store = Nexo::RunStore::Disk.new(dir: Config.runs_dir)
+        # Every tool an agent can call is one Nexo attached or one declared with
+        # the `tools` macro. Anything else is refused rather than run ungated.
+        c.strict_tools = true
       end
       Nexo.config.default_model = model.model
       Agents::SourceAgent.configure_model!(model)
