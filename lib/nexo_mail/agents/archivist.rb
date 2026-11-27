@@ -2,13 +2,11 @@
 
 module NexoMail
   module Agents
-    # Keeps the run history tidy. Inherits the shared triage config; attaches the
-    # snapshot tools instead of mail tools. Driven by the snapshot_keeper skill, it
-    # archives a finished run's artifacts and prunes old snapshots to the requested
-    # retention — the tools do the bounded file work, the agent decides the calls.
-    class Archivist < SourceAgent
-      # Reset inherited extraction skills — the archivist only manages snapshots.
-      @skills = %i[snapshot_keeper]
+    # Keeps the run history tidy. Driven by the snapshot_keeper skill, it archives a
+    # finished run's artifacts and prunes old snapshots to the requested retention —
+    # the tools do the bounded file work, the agent decides the calls.
+    class Archivist < Base
+      skills :snapshot_keeper
 
       # Both tools change files on the host (the snapshots directory), so they are
       # declared as :write. Nexo's permission gate then decides every call, exactly as

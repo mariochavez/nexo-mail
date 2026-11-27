@@ -14,41 +14,40 @@ module NexoMail
     # (attaches no mail tools), only reads the already-produced `digest.json`, and
     # runs the developer-authored, bundled render script inside its sandbox. Every
     # mail-reading agent stays strictly read-only (no shell).
-    class Publisher < SourceAgent
-      # Reset inherited extraction skills — the publisher only renders the dashboard.
-      @skills = %i[dashboard_designer]
+    class Publisher < Base
+      skills :dashboard_designer
 
       # Add :shell on top of the sandbox read/glob/write, so Nexo attaches the Shell
-      # tool (every sandbox tier below supports it). Mode stays :read_only.
+      # tool. Mode stays :read_only.
       permissions Nexo::Permissions.new(mode: :read_only, allow: %i[read glob write shell])
 
-      # WHERE the one shell in this app runs. It reaches no mail and needs no
-      # network, so it is the single stage that can be moved off the host entirely:
-      # `[dashboard] sandbox = "docker"` puts it in a throwaway container with no
-      # network, dropped capabilities and a read-only rootfs over an ephemeral
-      # scratch. "confined" keeps the shared workspace and fences the shell with an
-      # OS sandbox. "local" (the default) keeps it in the shared workspace, unfenced.
+      # WHERE the one shell in this app runs — `[dashboard] sandbox`. The FILES are
+      # always the shared workspace; what changes is what a shell command can reach:
       #
-      # A lazy READER override, like .requires above: Config is not loaded until
-      # CLI.run, and Nexo resolves the sandbox on first touch. Because the agent
-      # resolves this itself rather than being handed one, Nexo also OWNS it and
-      # closes it in #close — no teardown code here, and no leaked container.
+      #   "confined"  an OS sandbox (Seatbelt / Bubblewrap): writes only inside the
+      #               workspace, no home directory, no network. The default wherever
+      #               it can run.
+      #   "docker" /  a throwaway container per command, no network, capabilities
+      #   "apple"     dropped, read-only root, with only the workspace bound in.
+      #   "local"     an ordinary host process. Unfenced; `--check` says so.
+      #
+      # All three fences are the same Nexo seam: a :local sandbox whose shell runs
+      # through an `isolation:`. So no stage ever has a workspace of its own, and
+      # nothing has to be copied in or out of one.
+      #
+      # A lazy READER override: Config is not loaded until CLI.run, and Nexo resolves
+      # the sandbox on first touch.
       def self.sandbox
-        return confined_sandbox if Config.dashboard_sandbox == "confined"
-        return :local unless Config.dashboard_containerized?
-
-        {type: Config.dashboard_sandbox.to_sym, image: Config.dashboard_image,
-         network: :none, readonly_rootfs: Config.dashboard_sandbox != "apple"}
+        case Config.dashboard_sandbox
+        when "local" then :local
+        when "confined" then {type: :local, isolation: :confined, readable: Config.dashboard_readable}
+        else {type: :local, isolation: container_runner, readable: Config.dashboard_readable(ruby: false)}
+        end
       end
 
-      # `[dashboard] sandbox = "confined"`: still the shared workspace, but the shell
-      # runs inside an OS sandbox (nexo_ai >= 0.14, through the mxc gem). The render
-      # command can write only inside the workspace, cannot read the home directory
-      # and has no network. A confined command cannot read outside the workspace
-      # either, so the interpreter's own install is granted read-only — without it
-      # ruby starts and then cannot load its standard library.
-      def self.confined_sandbox
-        {type: :local, isolation: :confined, readable: [Config.dashboard_ruby_prefix].compact}
+      # One hardened, network-less container per render command.
+      def self.container_runner
+        Nexo::Sandboxes::ContainerRunner.new(image: Config.dashboard_image, runtime: Config.dashboard_sandbox.to_sym)
       end
 
       def self.prompt_key = "publisher"

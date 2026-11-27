@@ -83,7 +83,7 @@ module NexoMail
         c.strict_tools = true
       end
       Nexo.config.default_model = model.model
-      Agents::SourceAgent.configure_model!(model)
+      Agents::Base.configure_model!(model)
     end
 
     def parse(argv)
@@ -358,7 +358,8 @@ module NexoMail
       # Probe the SAME sandbox the Publisher declares, so `[dashboard] sandbox =
       # "docker"` checks the image rather than your host. One declaration, one probe.
       box = Nexo::Sandboxes.resolve(Agents::Publisher.sandbox, cwd: Config.sandbox_dir)
-      where = Config.dashboard_containerized? ? "#{Config.dashboard_sandbox} · #{Config.dashboard_image}" : Config.sandbox_dir
+      fence = Config.dashboard_containerized? ? "#{Config.dashboard_sandbox} · #{Config.dashboard_image}" : Config.dashboard_sandbox
+      where = "#{Config.sandbox_dir} · shell: #{fence}"
       env = box.environment(commands: required.keys)
       puts
       puts "  #{brand.render("sandbox".ljust(11))} #{dim.render(where)}"
@@ -369,12 +370,11 @@ module NexoMail
 
       required.each { |name, want| puts "  #{" " * 11} #{command_line(name, want, env[:commands][name.to_s])}" }
       puts "  #{" " * 11} #{dim.render("locale #{env[:locale] || "(unset)"}")}"
-      gaps = box.respond_to?(:hardening_gaps) ? box.hardening_gaps : []
-      gaps.each { |gap| puts "  #{" " * 11} #{dim.render("⚠ #{gap}")}" }
+      box.hardening_gaps.each { |gap| puts "  #{" " * 11} #{dim.render("⚠ #{gap}")}" }
     rescue => e
       puts "  #{brand.render("sandbox".ljust(11))} #{dim.render("probe unavailable: #{e.message}")}"
     ensure
-      box.close if box.respond_to?(:close)
+      box&.close
     end
 
     # One "does the sandbox have this, at a good enough version" line.

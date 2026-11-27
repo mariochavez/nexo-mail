@@ -4,7 +4,7 @@ module NexoMail
   module Agents
     # One data-driven triage agent for every tool-based email source (Gmail, HEY,
     # and any future IMAP/CLI-style service). It IS a SourceAgent — same model,
-    # :local sandbox, read-only permissions, extraction skills and triage prompt —
+    # workspace, read-only permissions, extraction skills and triage prompt —
     # but takes its per-source inputs from a Sources::Descriptor at construction
     # instead of hardcoding them as a subclass. The descriptor supplies the tools
     # that reach the inbox (through Nexo's `tools` macro) and the prompt-fragment

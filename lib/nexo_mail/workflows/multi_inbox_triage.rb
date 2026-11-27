@@ -31,13 +31,14 @@ module NexoMail
         available, skipped = partition_sources
         skipped.each { |name, reason| emit(:source_skipped, source: name, reason: reason) }
 
-        # The expensive half: three inboxes, minutes of model time. Behind a
-        # checkpoint it is paid for ONCE per run — a `--resume` after a failed
-        # synthesis re-enters #call from the top and gets this back from the run's
-        # state instead of reading every inbox again. (Durable only because the CLI
-        # points Nexo at a Disk run store; on the in-memory default the run, and this,
-        # die with the process.)
-        produced = checkpoint(:extract) { fan_out_sources(available) }
+        # The expensive half: three inboxes, minutes of model time, triaged
+        # concurrently. Each source is its OWN checkpoint, saved the moment it
+        # finishes — so it is paid for once per run, and a `--resume` after a crash
+        # or a failed synthesis re-enters #call from the top, gets the finished
+        # sources back from the run's state, and reads only an inbox that never
+        # landed. (Durable only because the CLI points Nexo at a Disk run store; on
+        # the in-memory default the run, and this, die with the process.)
+        produced = checkpoint_all(available.transform_values { |source| -> { extract_source(source) } }).compact
         return {sources: [], skipped: skipped, files: []} if produced.empty?
 
         drive_agent(Agents::Synthesize, "synthesis", synthesis_prompt(produced, stamp))
@@ -58,28 +59,10 @@ module NexoMail
 
       # ---- stage 1: source extraction (parallel) -------------------------------
 
-      # Triage the available sources concurrently — their LLM round-trips overlap in
-      # one async reactor. Each writes its own file, so no write contention. Takes a
-      # { display name => descriptor } hash; returns { name => filename } for the
-      # sources that actually wrote a file. Falls back to sequential when `async` is
-      # absent.
-      def fan_out_sources(sources)
-        return {} if sources.empty?
-
-        pairs =
-          begin
-            Nexo.concurrent(max_in_flight: sources.size) do |c|
-              sources.each_value { |descriptor| c.add { extract_source(descriptor) } }
-            end
-          rescue Nexo::MissingDependencyError => e
-            emit(:async_unavailable, error: e.message)
-            sources.values.map { |descriptor| extract_source(descriptor) }
-          end
-        pairs.compact.to_h
-      end
-
-      # Run one source agent to write its extraction file. Returns [name, file] when
-      # the file was written, else nil (a failed source drops out). Never raises.
+      # Run one source agent to write its extraction file. Returns the file name when
+      # it was written, else nil (a failed source drops out). Never raises — a
+      # checkpoint step that raised would fail the whole run and take the other
+      # sources with it.
       def extract_source(descriptor)
         started = clock
         name = descriptor.name
@@ -95,7 +78,7 @@ module NexoMail
         if File.exist?(File.join(Config.sandbox_dir, file))
           record_artifact(file)
           emit(:source_done, source: name, ms: ms_since(started))
-          [name, file]
+          file
         else
           emit(:source_failed, source: name, error: "no extraction file written", ms: ms_since(started))
           nil
@@ -145,44 +128,18 @@ module NexoMail
       DIGEST = "digest.json"
 
       # Copy the agent's DECLARED outputs (`produces`) onto the run record. Nexo
-      # reads each name through this workflow's sandbox and stores the bytes on the
-      # run, so a deliverable outlives the workspace that held it — and so a caller
-      # driving this workflow as a library gets the artifacts back without knowing
-      # where on disk we happened to write them. Never fatal.
+      # reads each name through this workflow's sandbox — the workspace every agent
+      # shares — and stores the bytes on the run, so a deliverable outlives the
+      # workspace that held it, and a caller driving this workflow as a library gets
+      # the artifacts back without knowing where on disk they were written. Never
+      # fatal.
       def collect_declared(agent, tag)
         return unless agent
 
-        collected = shares_workspace?(agent) ? collect_artifacts(agent) : import_artifacts(agent)
+        collected = collect_artifacts(agent)
         emit(:artifacts_collected, stage: tag, names: collected.map { |a| a["name"] }) unless collected.empty?
       rescue => e
         emit(:artifact_skipped, stage: tag, error: e.message)
-      end
-
-      # Nexo's collect_artifacts resolves an agent's declared names through the
-      # WORKFLOW's sandbox. That is right for every agent writing into the shared
-      # workspace and wrong for one sandboxed elsewhere, so ask the agent itself.
-      # Tolerant of a duck the way Nexo's own collect_artifacts is: anything that
-      # cannot name its sandbox is assumed to write into the shared workspace.
-      def shares_workspace?(agent)
-        !agent.respond_to?(:sandbox) || agent.sandbox.is_a?(Nexo::Sandboxes::Local)
-      end
-
-      # Collection for a containerized agent, whose workspace ceases to exist the
-      # moment the stage ends. Read each declared name through the agent's own
-      # sandbox, record the bytes on the run, and mirror them into the shared
-      # workspace so the later stages (the Archivist) and the CLI find them exactly
-      # where a :local run would have left them.
-      def import_artifacts(agent)
-        return [] unless agent.class.respond_to?(:produces)
-
-        agent.class.produces.filter_map do |name|
-          body = agent.sandbox.read(name)
-          sandbox.write(name, body)
-          artifact(name, content: body)
-        rescue => e
-          emit(:artifact_skipped, name: name.to_s, error: e.message)
-          nil
-        end
       end
 
       # The source agents can't use `produces`: one EmailSource CLASS serves every
@@ -221,20 +178,19 @@ module NexoMail
       # agent is told to run verbatim.
       def publisher_prompt(agent)
         emit(:publisher_sandbox, kind: Config.dashboard_sandbox, image: Config.dashboard_image)
-        # An omitted hardening flag means WEAKER isolation than was asked for, so the
-        # runtime reporting one is worth an event rather than a shrug.
-        gaps = agent.sandbox.hardening_gaps if agent.sandbox.respond_to?(:hardening_gaps)
-        emit(:publisher_hardening_gaps, gaps: gaps) if gaps && !gaps.empty?
+        # A gap means WEAKER isolation than the name suggests — an unfenced shell on
+        # "local" — so it is worth an event rather than a shrug.
+        gaps = agent.sandbox.hardening_gaps
+        emit(:publisher_hardening_gaps, gaps: gaps) unless gaps.empty?
 
         skill = Agents::Publisher.skills.first
         staged = stage_skill_resources(skill, agent.sandbox)
-        renderer = in_workspace(Config.dashboard_renderer(skill) { staged[:scripts]&.first }, staged[:scripts]&.first)
-        template = in_workspace(Config.dashboard_template(skill) { staged[:assets]&.first }, staged[:assets]&.first)
+        renderer = Config.dashboard_renderer(skill) { staged[:scripts]&.first }
+        template = Config.dashboard_template(skill) { staged[:assets]&.first }
         unless renderer && template
           emit(:publisher_failed, error: "the #{skill} skill ships no #{renderer ? "asset" : "script"} to render with")
           return nil
         end
-        return nil unless hand_over_inputs(agent)
 
         "Render the dashboard per the #{skill} skill, with the shell tool. Its script " \
           "and template have been staged into your workspace, so you can read or glob " \
@@ -244,44 +200,17 @@ module NexoMail
       end
 
       # `[dashboard] ruby` pins a HOST interpreter — the answer to a narrowed sandbox
-      # PATH on :local. Inside a container that path does not exist; the image's own
-      # ruby is the only one there, and choosing the image is how you choose it.
+      # PATH. Inside a container that path does not exist; the image's own ruby is the
+      # only one there, and choosing the image is how you choose it.
       def publisher_ruby = Config.dashboard_containerized? ? "ruby" : Config.dashboard_ruby
-
-      # `[dashboard] template` / `renderer` override with an ABSOLUTE HOST path, which
-      # a container cannot see. Fall back to the staged, workspace-relative copy and
-      # say so, rather than emitting a render command that is certain to fail.
-      def in_workspace(path, staged)
-        return path unless Config.dashboard_containerized? && path.to_s.start_with?("/") && staged
-
-        emit(:publisher_override_ignored, path: path.to_s, using: staged)
-        staged
-      end
-
-      # Hand the stage its input. On :local digest.json is already in the shared
-      # workspace and this is a no-op; a container starts with an empty one, so the
-      # bytes are copied across. Sandbox to sandbox, reading from the workspace
-      # rather than the run record: the file the previous stage wrote is the source
-      # of truth, and the recorded artifact is a copy of it.
-      def hand_over_inputs(agent)
-        return true if shares_workspace?(agent)
-
-        agent.sandbox.write(DIGEST, sandbox.read(DIGEST))
-        true
-      rescue => e
-        emit(:publisher_failed, error: "could not hand #{DIGEST} to the render sandbox: #{e.message}")
-        false
-      end
 
       # Copies every file the skill ships into the sandbox, preserving the
       # scripts//assets/ layout so the agent can glob `scripts/*` the way the skill's
       # own prose describes. Returns workspace-relative paths grouped by kind.
       #
-      # Nexo::Skills.materialize does this through the SANDBOX's own #write, so it
-      # works on :local, :docker/:apple and :remote alike — a plain FileUtils.cp (what
-      # this used to be) only ever worked on :local, and on a container it copied to a
-      # host directory the agent could not see. Overwrites each run, which is what
-      # bounds tampering with a staged script to a single turn. Never fatal.
+      # Nexo::Skills.materialize does this through the SANDBOX's own #write.
+      # Overwrites each run, which is what bounds tampering with a staged script to
+      # a single turn. Never fatal.
       def stage_skill_resources(skill, sandbox)
         Nexo::Skills.materialize(skill, into: sandbox, kinds: %i[scripts assets])
       rescue => e
