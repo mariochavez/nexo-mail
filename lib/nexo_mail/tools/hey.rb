@@ -13,7 +13,7 @@ module NexoMail
     #    the readable names and BOXES translates; nothing may silently fall back to the
     #    Imbox, which is how The Feed and Paper Trail went untriaged for so long.
     #
-    # 2. `posting["id"]` IS NOT THE THREAD ID. `hey threads <id>` wants the TOPIC id,
+    # 2. `posting["id"]` IS NOT THE THREAD ID. `hey thread read <id>` wants the TOPIC id,
     #    which appears only inside `app_url` (https://app.hey.com/topics/<TOPIC_ID>) and
     #    is a completely different number. Reading by posting id always 404s. Postings
     #    with kind "bundle" point at /contacts/<id> instead and have no readable thread
@@ -73,7 +73,7 @@ module NexoMail
         Array(boxes).flatten.map { |b| b.to_s.strip.downcase }.reject(&:empty?).uniq
       end
 
-      # The topic id `hey threads` actually accepts, or nil when the posting has no
+      # The topic id `hey thread read` actually accepts, or nil when the posting has no
       # readable thread (a "bundle" posting points at /contacts/<id>).
       def thread_id(posting)
         posting["app_url"].to_s[TOPIC, 1]&.to_i
