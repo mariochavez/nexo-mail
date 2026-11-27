@@ -31,13 +31,17 @@ one so the 1st of a month is never a cliff.
 Then **pass that window to the listing tools** — they do not know the date and will
 not filter by it unless you tell them:
 
-- HEY: `{"boxes": [...], "since": "<window_start>"}`
+- HEY: `{"boxes": ["imbox", "feed", "setaside"], "since": "<window_start>"}`, and
+  the Paper Trail separately, reaching further back because money is read by the
+  month and compared with the last one:
+  `{"boxes": ["papertrail"], "since": "<days_ago 90>"}`. Two calls, not one.
 - Gmail: `{"since": "<window_start>"}`
 - Apple Mail has no date filter on `get_emails`, so filter what it returns yourself
   against `date_received`, and use `search(..., after: "<window_start>")` when you
   need to reach further back.
 
-**Never emit an item dated before `window_start`.** Comparing ISO dates is plain
+**Never emit an item dated before `window_start`** — except Paper Trail money,
+which reaches back to `days_ago 90`. Comparing ISO dates is plain
 string order — `"2026-06-18" < "2026-07-15"` — so once you know the window there is
 nothing to guess.
 
@@ -138,16 +142,19 @@ body reads at all.
 
 The pattern, per inbox:
 
-1. **One listing call.** For HEY that is a single call for every box at once:
-   `{"boxes": ["imbox", "feed", "papertrail", "setaside"]}`. Do not call it once
-   per box.
+1. **List once.** For HEY that is the two calls above — three boxes at the window,
+   the Paper Trail at 90 days — never one call per box.
 2. **Classify everything you can from the listing.** Sender, subject, date and
    snippet settle the large majority of messages.
 3. **If bodies are genuinely needed, collect ALL the ids first and make ONE
    batched read call.** Never one call per message. The read tools take a list:
    `{"uids": [40182, 40190, 40201]}` for Gmail, `{"thread_ids": [2103920594,
    2104108150]}` for HEY.
-4. **Budget: at most two body-read calls per inbox.** If something is still
+4. **Budget: at most two body-read calls per inbox — plus one more for money.** A
+   bill, statement, receipt or payout whose snippet shows no amount must be opened
+   (see [financial_summary](../financial_summary/SKILL.md)); batch all of those
+   into a single extra read call.
+   If something is still
    unclear after that, classify it from what you have and move on — an item with
    an honest `summary` and no `payment` is worth more than another round trip.
 

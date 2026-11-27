@@ -217,7 +217,7 @@
   if(jobs.length) main.appendChild(jobsSec());
   if(sched.length) rail.appendChild(schedSec());
   if(opps.length) rail.appendChild(oppSec());
-  if(Object.keys(byCur).length||A(fin.charges).length) rail.appendChild(moneySec());
+  if(Object.keys(byCur).length||A(fin.charges).length||A(fin.open_bills).length) rail.appendChild(moneySec());
   if(people.length) rail.appendChild(peopleSec());
   app.appendChild(el("div",{class:"layout"},main,rail.childNodes.length?rail:null));
 
@@ -397,19 +397,34 @@
   function fig(label,amount,c,cls){var n=Number(amount)||0;
     return el("div",{class:"fig "+(cls||"")+(n?" on":" zero")},el("div",{class:"l"},label),el("div",{class:"v"},n?money(n,c):"—"));}
   function moneySec(){
-    var sb=el("div",{class:"sb"}), order=curOrder();
+    var sb=el("div",{class:"sb"}), order=curOrder(), prev=(fin.previous&&fin.previous.by_currency)||{};
+    // Unpaid bills lead: they are the part of the money picture that needs doing.
+    var bills=A(fin.open_bills);
+    if(bills.length){var bl=el("div",{class:"lines","data-s":""},el("div",{class:"cap"},"Bills to pay"));
+      bills.forEach(function(b){
+        var when=b.due_date?"due "+fmtDate(b.due_date):"no due date";
+        bl.appendChild(el("div",{class:"s"},
+          el("span",{title:b.subject||""},(b.merchant||"—")+" · ",el("span",{class:b.overdue?"pill red":""},b.overdue?"Overdue":when)),
+          el("span",{class:"a"},b.amount!=null?money(b.amount,b.currency):"amount not shown")));});
+      sb.appendChild(bl);}
     order.forEach(function(c){
-      var t=byCur[c]||{}, rows=curCharges(c);
+      var t=byCur[c]||{}, rows=curCharges(c), inflow=t["in"]!=null?t["in"]:(t.refund||0), spent=(t.charged||0)+(t.paid||0);
       var block=el("div",{class:"cur","data-s":""},
         el("div",{class:"code"},el("span",null,c),el("span",null,rows.length+(rows.length===1?" item":" items"))),
-        el("div",{class:"figs"},fig("Due",t.due,c,"due"),fig("Charged",t.charged,c),fig("Paid",t.paid,c)));
+        el("div",{class:"figs"},fig("In",inflow,c),fig("Spent",spent,c),fig("Due",t.due,c,"due")));
       var lines=el("div",{class:"lines"});
-      if(t.refund){lines.appendChild(el("div",{class:"s"},el("span",null,"Received / refunded"),el("span",{class:"a"},money(t.refund,c))));}
+      if(t.income){lines.appendChild(el("div",{class:"s"},el("span",null,"Income"),el("span",{class:"a"},money(t.income,c))));}
+      if(t.refund){lines.appendChild(el("div",{class:"s"},el("span",null,"Refunded"),el("span",{class:"a"},money(t.refund,c))));}
+      if(prev[c]){lines.appendChild(el("div",{class:"s"},el("span",null,"Last month · out"),el("span",{class:"a"},money(prev[c].out,c))));}
       var subs=rows.filter(function(x){return x.kind==="subscription";});
       if(subs.length){lines.appendChild(el("div",{class:"cap"},"Subscriptions"));
         subs.forEach(function(u){lines.appendChild(el("div",{class:"s"},el("span",{title:u.merchant||""},u.merchant||"—"),el("span",{class:"a"},money(u.amount,c))));});}
       if(lines.childNodes.length)block.appendChild(lines);
       sb.appendChild(block);});
+    var missing=A(fin.recurring_missing);
+    if(missing.length){var ml=el("div",{class:"lines","data-s":""},el("div",{class:"cap"},"Not seen yet this month"));
+      missing.forEach(function(m){ml.appendChild(el("div",{class:"s"},el("span",null,(m.merchant||"—")+" · last "+fmtDate(m.last_date)),el("span",{class:"a"},money(m.last_amount,m.currency))));});
+      sb.appendChild(ml);}
     var bars=A(fin.chart&&fin.chart.bars);
     if(bars.length){var max=Math.max.apply(null,bars.map(function(b){return Number(b.amount)||0;}).concat([1]));
       var wrap=el("div",{class:"bars"},el("div",{class:"cap"},"Biggest movements"+(fin.chart.currency?" · "+fin.chart.currency:"")));
@@ -417,7 +432,8 @@
         wrap.appendChild(el("div",{class:"mv"},el("div",{class:"l"},el("span",{title:b.label||""},b.label||"—"),el("span",{class:"a"},money(b.amount,fin.chart.currency))),
           el("div",{class:"t"},el("div",{class:"f",style:"width:"+w+"%"}))));});
       sb.appendChild(wrap);}
-    return sec("money","a","Money",order.length>1?order.length+" currencies":null,sb);
+    var p=fin.period||{}, label=parseDate(p.since)?parseDate(p.since).toLocaleDateString(undefined,{month:"long"}):(order.length>1?order.length+" currencies":null);
+    return sec("money","a","Money",label,sb);
   }
   function peopleSec(){
     var sb=el("div",{class:"sb"});

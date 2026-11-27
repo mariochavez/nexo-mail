@@ -297,7 +297,7 @@ Ruby does I/O and exact arithmetic; every judgment is a skill. Concretely:
 | What day is it? | `Tools::Today` — a clock, no opinions |
 | How far back does the briefing reach? | the **skills** (15th of previous month → today), passed to tools as `since:` |
 | Which payments belong in the totals? | the **skills** — the tool adds up whatever it is given |
-| What is 100.00 + 80.00 + 949.00? | `Tools::SumPayments` — BigDecimal, per currency, never converting |
+| What is 100.00 + 80.00 + 949.00? | `Tools::MoneyReport` — reads the payments on record, BigDecimal, per currency, never converting |
 | Which mail is action / fyi / noise? | the **skills** |
 | How much mail may one call return? | Ruby (`hey_box_limit`, `gmail_list_limit`) — volume, not relevance |
 
