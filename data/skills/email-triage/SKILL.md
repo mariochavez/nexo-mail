@@ -1,5 +1,5 @@
 ---
-name: email_triage
+name: email-triage
 description: Triage the NEW mail in one email inbox and EXTRACT it into structured JSON — classify each message into Action / FYI / Noise, and pull the entities that matter (payments & charges, meetings, people, newsletter topics). Read-only. The deliverable is a JSON file, not prose.
 ---
 
@@ -152,7 +152,7 @@ The pattern, per inbox:
    2104108150]}` for HEY.
 4. **Budget: at most two body-read calls per inbox — plus one more for money.** A
    bill, statement, receipt or payout whose snippet shows no amount must be opened
-   (see [financial_summary](../financial_summary/SKILL.md)); batch all of those
+   (see [financial-summary](../financial-summary/SKILL.md)); batch all of those
    into a single extra read call.
    If something is still
    unclear after that, classify it from what you have and move on — an item with
@@ -257,7 +257,7 @@ Optional — include ONLY when the message genuinely carries it:
 
 - `importance`: integer 0–100 (your judgement of how much this matters to the reader).
 - `thread_id`: the provider's thread/conversation id, if the tools expose it.
-- `payment`: see [financial_summary](../financial_summary/SKILL.md). Attach to any
+- `payment`: see [financial-summary](../financial-summary/SKILL.md). Attach to any
   receipt, invoice, charge, bill, refund, or payment-due message. Never fabricate
   an amount — omit `payment` if you can't read a real number.
 - `meeting`: `{ "title", "start", "end", "location", "link", "rsvp" }` — for
@@ -268,7 +268,7 @@ Optional — include ONLY when the message genuinely carries it:
 - `dev`: required on every `dev`-lane item — see above.
 - `opportunity`: required on every `opportunity`-lane item — see above.
 - `topics`: array of short topic tags for `newsletter` items — see
-  [interest_radar](../interest_radar/SKILL.md). E.g. `["ruby", "rails"]`,
+  [interest-radar](../interest-radar/SKILL.md). E.g. `["ruby", "rails"]`,
   `["photography"]`.
 
 ## Buckets, briefly

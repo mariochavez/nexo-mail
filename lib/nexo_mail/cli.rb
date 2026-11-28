@@ -124,7 +124,7 @@ module NexoMail
     # and each source that finished is returned from the run's checkpoints. Only
     # possible because runs persist to disk — see the run_store line in
     # #configure_model!.
-    RESUMABLE = %w[suspended failed interrupted].freeze
+    RESUMABLE = ["suspended", *Nexo::Workflow::RETRYABLE].freeze
 
     def resume(which)
       Nexo::Workflow.reconcile_interrupted!
@@ -192,10 +192,8 @@ module NexoMail
     # The configured run store — Nexo::RunStore::Disk, set in #configure_model!.
     def runs = Nexo::RunStore.default
 
-    # Runs, newest first by when they STARTED. A run's id is a UUIDv7, which sorts
-    # by creation; the store's own order is by file time, and sweeping interrupted
-    # runs rewrites old files.
-    def newest_first = runs.all.sort_by { |run| run.id.to_s }.reverse
+    # Runs, newest first by when they started (nexo_ai 0.17 orders them so).
+    def newest_first = runs.all
 
     # Nexo never prunes run documents: retention is the host's policy, and each one
     # carries this run's artifacts. Keep the newest N, delete the rest. Best-effort.
@@ -590,8 +588,8 @@ module NexoMail
 
       section "MORE"
       note "Skills:  #{Config.skills_dir}"
-      note "  email_triage · financial_summary · interest_radar (extraction),"
-      note "  inbox_synthesis (digest), dashboard_designer (HTML), snapshot_keeper."
+      note "  email-triage · financial-summary · interest-radar (extraction),"
+      note "  inbox-synthesis (digest), dashboard-designer (HTML), snapshot-keeper."
       note "Prompts: #{Config.prompts_dir}  (drop common.md / gmail.md / … to extend agents)"
       note "Any unconfigured service is skipped; the run continues. RUBYLLM_WIRE=1 shows logs."
       puts

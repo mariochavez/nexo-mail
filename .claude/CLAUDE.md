@@ -65,9 +65,9 @@ lib/nexo_mail/
                             #   (replace digest keys / put+drop list entries)
   workflows/                # MultiInboxTriage < Nexo::Workflow (orchestration only)
 data/                       # PACKAGED: config.example.toml, skills/, themes/, prompts/
-  skills/                   # email_triage, financial_summary, interest_radar (extract),
-                            #   inbox_synthesis (digest), dashboard_designer (HTML),
-                            #   snapshot_keeper (archive/prune)
+  skills/                   # email-triage, financial-summary, interest-radar (extract),
+                            #   inbox-synthesis (digest), dashboard-designer (HTML),
+                            #   snapshot-keeper (archive/prune)
 exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
 ```
 
@@ -75,8 +75,8 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
 
 1. **Source agents** (AppleMail/Gmail/HEY, parallel) extract the mail that is NEW
    since the last run and commit it into a structured JSON array file
-   (`gmail.json`, …) holding the whole window. Skills: `email_triage`,
-   `financial_summary`, `interest_radar`. The workflow walks `NexoMail::Sources.all`
+   (`gmail.json`, …) holding the whole window. Skills: `email-triage`,
+   `financial-summary`, `interest-radar`. The workflow walks `NexoMail::Sources.all`
    — one **descriptor** per source (name, file, `prompt_key`, tools, availability).
    Tool-based sources (Gmail, HEY) share ONE `Agents::EmailSource` built from a
    descriptor; adding such a service is a descriptor, not a class. Apple Mail keeps
@@ -85,16 +85,16 @@ exe/nexo-triage             # 3-line shim → NexoMail::CLI.run(ARGV)
    files, an UPDATE from only the items triaged since, or not run at all
    (`DigestFile.plan`):
    merge, **cross-source dedupe**, money rollups, schedule, stories, per-person
-   detail, topic briefings. Skills: `inbox_synthesis`, `financial_summary`,
-   `interest_radar`.
-3. **Publisher** renders `dashboard.html` by RUNNING the `dashboard_designer`
+   detail, topic briefings. Skills: `inbox-synthesis`, `financial-summary`,
+   `interest-radar`.
+3. **Publisher** renders `dashboard.html` by RUNNING the `dashboard-designer`
    skill's bundled `scripts/render_dashboard.rb` over `assets/dashboard-template.html`
    + `digest.json` (the workflow STAGES the skill's `scripts/`+`assets/` into the
    sandbox first, so the agent's gated file tools can reach them). The design is
    a fixed, versioned template rendered deterministically — the model does NOT author
    HTML. Editing the look = editing the template, not the skill prose.
 4. **Archivist** archives the run + prunes old snapshots via the `ArchiveRun` /
-   `PruneSnapshots` tools. Skill: `snapshot_keeper`.
+   `PruneSnapshots` tools. Skill: `snapshot-keeper`.
 
 The workflow only decides which agents run and sequences them; it reads no mail,
 parses no JSON, renders nothing.
@@ -194,7 +194,7 @@ parses no JSON, renders nothing.
   (the home directory is, on OrbStack/Docker Desktop). `hardening_gaps` is emitted.
 - **A skill states its needs in `compatibility:`** — the Agent Skills spec's own
   frontmatter field, which nexo_ai >= 0.9 appends to the model's instructions.
-  `dashboard_designer` uses it to say it needs a Ruby 3.0+ interpreter and the shell
+  `dashboard-designer` uses it to say it needs a Ruby 3.0+ interpreter and the shell
   tool, and that there is no fallback. Subject to the SAME seed-once gotcha as the
   rest of the skill: editing `data/skills/*/SKILL.md` does not reach an existing
   install — `cp` it over `Config.skills_dir`.
@@ -252,7 +252,7 @@ parses no JSON, renders nothing.
   cannot persist across runs; the residual window is a single turn. A `[dashboard]`
   override is used as an absolute path instead and is never staged.
 - **The dashboard is a skill-owned template, not model-authored HTML.** The design +
-  render live in `data/skills/dashboard_designer/{assets/dashboard-template.html,
+  render live in `data/skills/dashboard-designer/{assets/dashboard-template.html,
   scripts/render_dashboard.rb}` (seeded to `skills_dir`). The Publisher pulls them
   from **config-driven paths** and renders via shell:
   `Config.dashboard_ruby "<Config.dashboard_renderer>" digest.json "<Config.dashboard_template>" dashboard.html`.
@@ -302,7 +302,7 @@ parses no JSON, renders nothing.
   1.16 it reached the model as Ruby `inspect`. The explicit JSON keeps the shape ours.)
 - **The run window is the AGENT's, not Ruby's.** Ruby holds no date policy at all:
   `Tools::Today` is a clock (today, month bounds, previous_month — no judgments),
-  and the `email_triage` / `inbox_synthesis` skills define the window as *the 15th
+  and the `email-triage` / `inbox-synthesis` skills define the window as *the 15th
   of `previous_month` → today* and pass it to the tools as `HeyBox(since:)` /
   `GmailImap::List(since:)`. Ruby bounds VOLUME only (`hey_box_limit`,
   `gmail_list_limit`); relevance is a judgment and lives in the skills. Omitting
@@ -405,14 +405,14 @@ parses no JSON, renders nothing.
   pending payment sent the builder back through every extraction file to re-send all
   the charges (3m11s) — which is why money now comes from `MoneyReport` reading the
   record. What remains is model thinking time,
-  not bytes. The seed-once gotcha applies: `inbox_synthesis` must be copied over an
+  not bytes. The seed-once gotcha applies: `inbox-synthesis` must be copied over an
   existing install, or the agent follows the old skill and writes `digest.json`
   directly (which then never commits, and the run suspends).
 - **Every item has a LANE, and the lane — not one window — decides where it shows
   and how long it lives.** `conversation`, `money`, `dev`, `reading`, `opportunity`,
-  `jobs`, `ephemeral` (`SenderMemory::LANES`). The rules are skill text: `email_triage`
+  `jobs`, `ephemeral` (`SenderMemory::LANES`). The rules are skill text: `email-triage`
   assigns the lane (plus a `dev` record keyed by `ref`, e.g. `owner/repo#123`, and an
-  `opportunity` record with `deadline`/`starts`); `inbox_synthesis` §4b maps lanes to
+  `opportunity` record with `deadline`/`starts`); `inbox-synthesis` §4b maps lanes to
   digest sections — `dev` (ONE entry per `ref`, however many notifications and
   inboxes), `opportunities`, `jobs`, `counts.ephemeral` — and gives each its lifetime.
   Ruby only carries it: `CommitExtraction(keep_by_lane:)` takes a cutoff per lane,
@@ -456,7 +456,7 @@ parses no JSON, renders nothing.
 - **`data/**` must stay in `spec.files`** or bundled config/skills/themes/templates
   won't ship. Verify a new asset ships: `gem build … && gem unpack …` then `find`.
 - **The dashboard is agent-authored, so its safety lives in the skill**
-  (`dashboard_designer`): self-contained (no CDN/web-fonts — CSP-free but must open
+  (`dashboard-designer`): self-contained (no CDN/web-fonts — CSP-free but must open
   from `file://`), render untrusted email text via `textContent` only, embed data as
   a JSON blob with `<` escaped to `<` (defeats a `</script>` breakout), and
   `^https?://`-check any link. There is NO Ruby renderer/fallback — if the Publisher

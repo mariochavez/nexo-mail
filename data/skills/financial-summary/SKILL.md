@@ -1,5 +1,5 @@
 ---
-name: financial_summary
+name: financial-summary
 description: Identify and normalize money in an inbox — receipts, invoices, charges, bills, statements, subscriptions, refunds, payouts and income — into a consistent `payment` object, and build the money picture from the record with the money_report tool. Never fabricate amounts.
 ---
 
@@ -103,7 +103,7 @@ place a body read is required rather than optional: a bill, statement, payout or
 receipt without its figure is worth almost nothing to the money picture, and most
 of the reader's bills and statements were once recorded with no amount at all for
 exactly this reason. Collect every such id and make ONE batched read call (see
-"Reading efficiently" in [email_triage](../email_triage/SKILL.md)); money reads
+"Reading efficiently" in [email-triage](../email-triage/SKILL.md)); money reads
 have their own allowance there. If the body has no figure either, record the bill
 with `amount: null`.
 

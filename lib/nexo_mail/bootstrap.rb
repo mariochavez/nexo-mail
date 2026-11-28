@@ -17,8 +17,26 @@ module NexoMail
       seed_prompts
     end
 
+    # Skill folders are named with hyphens since nexo_ai 0.17 (the Agent Skills
+    # specification). An install seeded earlier has them with underscores: rename
+    # each one in place, so the user's edits are kept, and fix its `name:` line.
+    def rename_skills
+      return unless File.directory?(Config.skills_dir)
+
+      Dir.children(Config.skills_dir).grep(/_/).each do |old|
+        from = File.join(Config.skills_dir, old)
+        to = File.join(Config.skills_dir, old.tr("_", "-"))
+        next unless File.file?(File.join(from, "SKILL.md")) && !File.exist?(to)
+
+        File.rename(from, to)
+        file = File.join(to, "SKILL.md")
+        File.write(file, File.read(file).sub(/^name:\s*#{Regexp.escape(old)}\s*$/, "name: #{old.tr("_", "-")}"))
+      end
+    end
+
     def seed_skills
       FileUtils.mkdir_p(Config.skills_dir)
+      rename_skills
       gem_skills = data("skills")
       Dir.children(gem_skills).each do |name|
         dest = File.join(Config.skills_dir, name)

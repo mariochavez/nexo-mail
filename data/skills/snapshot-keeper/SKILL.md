@@ -1,5 +1,5 @@
 ---
-name: snapshot_keeper
+name: snapshot-keeper
 description: Keep the run history tidy. Archive a finished triage's artifacts into a timestamped snapshot, and prune old snapshots down to the retention the prompt asks for. You drive the decision; the archive_run and prune_snapshots tools do the actual, bounded file work.
 ---
 

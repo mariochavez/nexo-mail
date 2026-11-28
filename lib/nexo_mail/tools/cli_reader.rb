@@ -11,10 +11,16 @@ module NexoMail
     # command in its own process group and kills the group when the time is up. A
     # hung `hey` used to hold Tools::Hey::LOCK for good.
     module CliReader
+      # What a CLI is started with. Not the whole environment: an API key in this
+      # process is none of `hey`'s business. `hey` signs in through the macOS
+      # keyring, which needs only the user's identity and home (checked: `hey auth
+      # status` and a box read both work with exactly these).
+      ENVIRONMENT = %w[HOME PATH USER LOGNAME LANG LC_ALL TMPDIR XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME XDG_CACHE_HOME].freeze
+
       module_function
 
       def json(*argv, timeout: Config.cli_timeout)
-        out, err, status = Nexo::Sandboxes::Subprocess.capture(ENV.to_h, *argv, timeout: timeout)
+        out, err, status = Nexo::Sandboxes::Subprocess.capture(ENV.to_h.slice(*ENVIRONMENT), *argv, timeout: timeout)
         return {error: "#{argv.first} exited #{status.inspect}: #{err.strip[0, 300]}"} unless status == 0
 
         begin

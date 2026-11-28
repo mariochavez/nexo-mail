@@ -3,7 +3,7 @@
 module NexoMail
   module Agents
     # Publishes the dashboard. The design and the render live in the
-    # dashboard_designer SKILL (a fixed template + a render script). The workflow
+    # dashboard-designer SKILL (a fixed template + a render script). The workflow
     # STAGES both into the workspace before this agent runs — so they are reachable
     # through its permission-gated file tools, which skill files outside the
     # sandbox are not — and this agent RUNS the script with the Shell tool. Every
@@ -15,7 +15,7 @@ module NexoMail
     # runs the developer-authored, bundled render script inside its sandbox. Every
     # mail-reading agent stays strictly read-only (no shell).
     class Publisher < Base
-      skills :dashboard_designer
+      skills "dashboard-designer"
 
       # Add :shell on top of the sandbox read and write, so Nexo attaches the Shell
       # tool. Mode stays :read_only.
@@ -73,7 +73,7 @@ module NexoMail
       instructions <<~TXT
         You render the dashboard by running the render command the prompt gives you
         with the shell tool — you do NOT hand-write HTML. The command runs the
-        dashboard_designer skill's render script over the configured template and the
+        dashboard-designer skill's render script over the configured template and the
         workspace `digest.json`, producing `dashboard.html`. Run it exactly as given,
         then confirm in one line. If the script prints an error, report it plainly and
         stop — do not try to author the HTML yourself.

@@ -2,7 +2,7 @@
 
 Drop optional Markdown files here to **append** extra instructions to the triage
 agents' system prompts. Fragments are *added on top of* each agent's built-in
-instructions and the email_triage skill — they never replace them.
+instructions and the email-triage skill — they never replace them.
 
 Files (all optional):
 

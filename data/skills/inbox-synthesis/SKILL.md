@@ -1,5 +1,5 @@
 ---
-name: inbox_synthesis
+name: inbox-synthesis
 description: Keep the digest. Build it in full from the per-source extraction files, or update the saved one with only the mail triaged since — merge and de-duplicate into one picture, roll up the money, order the schedule, narrate the stories and people. Write the digest keys to digest.update.json and save them with commit_digest, then write inbox-digest.md (a short terminal digest). This is where the whole inbox becomes one briefing.
 ---
 
@@ -59,7 +59,7 @@ Call `money_report` ONCE with:
 
 **Do not write `finance`.** The tool builds the section from every payment on
 record and `commit_digest` saves it. You never gather payments, add numbers or
-copy the result. See [financial_summary](../financial_summary/SKILL.md).
+copy the result. See [financial-summary](../financial-summary/SKILL.md).
 
 What you do with what it returns:
 
@@ -97,7 +97,7 @@ upcoming, omit the schedule section entirely rather than filling it with history
   they said, whose court the ball is in. This is the part that matters most.
 - **Radar / topics:** per-interest "what's going on" briefings (Ruby, Rails,
   photography, any theme with signal) — follow
-  [interest_radar](../interest_radar/SKILL.md).
+  [interest-radar](../interest-radar/SKILL.md).
 
 ## 4b. Lanes — each kind of mail has its own place and its own lifetime
 

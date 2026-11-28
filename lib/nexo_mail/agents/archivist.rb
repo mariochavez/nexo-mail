@@ -2,11 +2,11 @@
 
 module NexoMail
   module Agents
-    # Keeps the run history tidy. Driven by the snapshot_keeper skill, it archives a
+    # Keeps the run history tidy. Driven by the snapshot-keeper skill, it archives a
     # finished run's artifacts and prunes old snapshots to the requested retention —
     # the tools do the bounded file work, the agent decides the calls.
     class Archivist < Base
-      skills :snapshot_keeper
+      skills "snapshot-keeper"
       # It works through its two tools alone, so it carries no file tools.
       file_tools :none
 
@@ -19,7 +19,7 @@ module NexoMail
 
       instructions <<~TXT
         You keep the run history tidy with the archive_run and prune_snapshots tools,
-        following the snapshot_keeper skill. Do exactly what the prompt asks —
+        following the snapshot-keeper skill. Do exactly what the prompt asks —
         archive-then-prune after a run, or prune only — and confirm the result in one
         line. Nothing else.
       TXT

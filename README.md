@@ -23,7 +23,7 @@ Requires Ruby 3.3+ and macOS for Apple Mail. First run creates the config under 
 ```
 $XDG_CONFIG_HOME/nexo-mail/          (default ~/.config/nexo-mail/)
   config.toml                        # your config (annotated; edit it)
-  skills/email_triage/SKILL.md       # classification rules (override the bundled default)
+  skills/email-triage/SKILL.md       # classification rules (override the bundled default)
   prompts/                           # optional per-agent prompt fragments
 $XDG_STATE_HOME/nexo-mail/sandbox/   (default ~/.local/state/…) — fragments + the digest
 ```
@@ -110,7 +110,7 @@ The digest is kept the same way. A run hands the digest agent only the items tri
 since the digest was last saved, and it rewrites just the entries and sections they
 touch; with nothing new and a digest already built today, the run stops after the
 inboxes (about 14 seconds). `--rebuild-digest` forces a full build on the next run
-without re-reading any mail — use it after editing the `inbox_synthesis` skill.
+without re-reading any mail — use it after editing the `inbox-synthesis` skill.
 
 A run that reads every inbox and then fails to build the digest **pauses** rather
 than dying: the extraction is checkpointed, so `--resume` picks up at synthesis
@@ -127,7 +127,7 @@ though it resolves in your terminal. If it doesn't, preflight says so and you pi
 
 ## Customize
 
-- **Classification & VIP senders** — edit `~/.config/nexo-mail/skills/email_triage/SKILL.md`
+- **Classification & VIP senders** — edit `~/.config/nexo-mail/skills/email-triage/SKILL.md`
   (seeded from the bundled default on first run; your edits win and survive upgrades).
 - **Per-agent prompt fragments** — drop Markdown in `~/.config/nexo-mail/prompts/`:
   `common.md` (appended to every agent) or `apple_mail.md` / `gmail.md` / `hey.md` /
