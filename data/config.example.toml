@@ -75,7 +75,7 @@ flavor = "mocha"
 # triaged since the digest was last saved, and it rewrites just the sections they
 # touch. With nothing new and a digest already built today, the run stops after the
 # inboxes. `nexo-triage --rebuild-digest` forces the next run to build it in full
-# (no mail is re-read) — use it after editing the inbox_synthesis skill.
+# (no mail is re-read) — use it after editing the inbox-synthesis skill.
 
 # ── Dashboard ───────────────────────────────────────────────────────────────
 # The Publisher renders dashboard.html from a template + a render script. Both are
@@ -100,8 +100,8 @@ flavor = "mocha"
 # sandbox  = "confined"       # confined | local | docker | apple
 # image    = "ruby:3.3-slim"  # containerized runs only
 # ruby     = "/path/to/ruby"  # default: the Ruby running nexo-triage
-# template = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/assets/dashboard-template.html"
-# renderer = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard_designer/scripts/render_dashboard.rb"
+# template = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard-designer/assets/dashboard-template.html"
+# renderer = "${XDG_CONFIG_HOME:-~/.config}/nexo-mail/skills/dashboard-designer/scripts/render_dashboard.rb"
 
 # ── Reading (optional) ──────────────────────────────────────────────────────
 # How much mail the source tools pull, and how much of each message they hand

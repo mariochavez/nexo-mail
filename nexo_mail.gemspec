@@ -29,7 +29,7 @@ Gem::Specification.new do |spec|
   # nexo_ai brings ruby_llm 2.2, which ships MCP itself. The community ruby_llm-mcp
   # gem defines the same RubyLLM::MCP constant and must not be bundled alongside it;
   # ruby_llm-skills is no longer needed (nexo_ai reads SKILL.md itself).
-  spec.add_dependency "nexo_ai", "~> 0.16.1"
+  spec.add_dependency "nexo_ai", "~> 0.17"
   # The OS sandbox behind `[dashboard] sandbox = "confined"`. nexo_ai loads it only
   # on that path; listing it here means the option works on a plain gem install.
   spec.add_dependency "mxc", ">= 0.4.1"

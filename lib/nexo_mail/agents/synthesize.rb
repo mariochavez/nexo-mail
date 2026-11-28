@@ -12,7 +12,7 @@ module NexoMail
     # `digest.update.json` and calls Tools::CommitDigest, which replaces just those
     # top-level keys in `digest.json` — plus `inbox-digest.md`, the terminal digest.
     class Synthesize < Base
-      skills :inbox_synthesis, :financial_summary, :interest_radar
+      skills "inbox-synthesis", "financial-summary", "interest-radar"
 
       def self.prompt_key = "synthesize"
 
@@ -34,8 +34,8 @@ module NexoMail
       tools Tools::CommitDigest, capability: :write
 
       instructions <<~TXT
-        You keep the digest, following the inbox_synthesis, financial_summary and
-        interest_radar skills. The prompt says which kind of run this is. On a FULL
+        You keep the digest, following the inbox-synthesis, financial-summary and
+        interest-radar skills. The prompt says which kind of run this is. On a FULL
         build, read the extraction files it names and build the whole digest. On an
         UPDATE, call new_items for the mail triaged since the digest was saved, read
         `digest.json`, and change only what that mail touches. Either way: merge and

@@ -8,7 +8,7 @@ module NexoMail
     # Apple Mail is the one source whose reads we cannot batch: apple-mail-mcp is a
     # third-party server, and its `get_email` takes exactly one message_id and returns
     # the FULL body with no cap. The two levers we do have are both applied here —
-    # the reply size (see #wrap_mcp_tool) and the instructions (the email_triage skill
+    # the reply size (see #wrap_mcp_tool) and the instructions (the email-triage skill
     # tells the agent to lean on `search`, which returns content_snippet for many
     # messages at once, instead of calling `get_email` per message).
     class AppleMailSource < SourceAgent

@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 # render_dashboard.rb — the deterministic dashboard renderer, bundled WITH the
-# dashboard_designer skill (not with the app). The Publisher agent copies this
+# dashboard-designer skill (not with the app). The Publisher agent copies this
 # script + the template into its workspace and runs:
 #
 #   ruby render_dashboard.rb digest.json dashboard-template.html dashboard.html

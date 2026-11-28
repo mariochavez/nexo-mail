@@ -7,5 +7,6 @@ gemspec
 
 group :development do
   gem "rake"
+  gem "minitest"
   gem "standard" # linter + formatter (github.com/standardrb/standard)
 end

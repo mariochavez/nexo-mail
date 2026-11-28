@@ -1,5 +1,5 @@
 ---
-name: interest_radar
+name: interest-radar
 description: Turn newsletters and topic mail into a "what's going on" briefing per interest (Ruby, Rails, photography, and any recurring theme in the inbox). Tag items with topics during extraction; synthesize a short per-topic picture during merge.
 ---
 

@@ -51,10 +51,10 @@ all archived to a timestamped snapshot.
                                   │
 ┌──────────────────────────────────────────────────────────────────────┐
 │  SKILLS  (data/skills/*, seeded to the XDG skills dir)                  │
-│    email_triage · financial_summary · interest_radar   (extraction)    │
-│    inbox_synthesis      (build the digest)                             │
-│    dashboard_designer   (template + render script for the dashboard)   │
-│    snapshot_keeper      (archive / prune policy)                       │
+│    email-triage · financial-summary · interest-radar   (extraction)    │
+│    inbox-synthesis      (build the digest)                             │
+│    dashboard-designer   (template + render script for the dashboard)   │
+│    snapshot-keeper      (archive / prune policy)                       │
 └──────────────────────────────────────────────────────────────────────┘
                                   │
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -284,7 +284,7 @@ lock, not a tuning knob, is what makes the rest of the concurrency safe.
 
 Apple Mail is the exception: `apple-mail-mcp` is a third-party server whose
 `get_email` is one-message-at-a-time and untruncated. `AppleMailSource` wraps its
-gated MCP tools in `Tools::CappedTool` to bound the reply, and the `email_triage`
+gated MCP tools in `Tools::CappedTool` to bound the reply, and the `email-triage`
 skill steers the agent toward `search` (batched, with `content_snippet`) instead of
 repeated `get_email`.
 
@@ -313,20 +313,20 @@ Changing behavior means editing Markdown, not Ruby.
 
 | Skill | Attached to | Does |
 |-------|-------------|------|
-| `email_triage` | source agents | classify → JSON items; entity extraction contract |
-| `financial_summary` | source + synthesize | identify payments/charges; Briq & Yo Te Presto always-financial; transaction dedup |
-| `interest_radar` | source + synthesize | tag & brief newsletter topics (Ruby, Rails, Photography, Tech) as bullets |
-| `inbox_synthesis` | synthesize | merge, cross-source & cross-group dedup, money roll-up, stories, people |
-| `dashboard_designer` | publisher | the dashboard: a fixed template + a render script (run, don't hand-write) |
-| `snapshot_keeper` | archivist | when to archive / how many to keep |
+| `email-triage` | source agents | classify → JSON items; entity extraction contract |
+| `financial-summary` | source + synthesize | identify payments/charges; Briq & Yo Te Presto always-financial; transaction dedup |
+| `interest-radar` | source + synthesize | tag & brief newsletter topics (Ruby, Rails, Photography, Tech) as bullets |
+| `inbox-synthesis` | synthesize | merge, cross-source & cross-group dedup, money roll-up, stories, people |
+| `dashboard-designer` | publisher | the dashboard: a fixed template + a render script (run, don't hand-write) |
+| `snapshot-keeper` | archivist | when to archive / how many to keep |
 
 ## The dashboard — a skill-owned template, rendered deterministically
 
 The dashboard's design and rendering live **with the skill**, not in the library:
 
-- `dashboard_designer/assets/dashboard-template.html` — the fixed design (CSS + a
+- `dashboard-designer/assets/dashboard-template.html` — the fixed design (CSS + a
   JS renderer that builds the page from an embedded `digest.json` blob).
-- `dashboard_designer/scripts/render_dashboard.rb` — injects the run's
+- `dashboard-designer/scripts/render_dashboard.rb` — injects the run's
   `digest.json` into the template, escaping the untrusted email text so it can't
   break out of the `<script>`. Deterministic; never trusts the model.
 
@@ -419,7 +419,7 @@ Every inbox-touching agent stays strictly read-only — verify with
 | Orchestration | `lib/nexo_mail/workflows/multi_inbox_triage.rb` |
 | Source catalog | `lib/nexo_mail/sources.rb` (`Sources.all` — one descriptor per service) |
 | Agents | `lib/nexo_mail/agents/*.rb` (`source_agent` base, `email_source`, `apple_mail_source`, `synthesize`, `publisher`, `archivist`) |
-| Skills | `data/skills/*/SKILL.md` (+ `dashboard_designer/{assets,scripts}`), seeded to XDG |
+| Skills | `data/skills/*/SKILL.md` (+ `dashboard-designer/{assets,scripts}`), seeded to XDG |
 | Integration — Gmail (IMAP) | `lib/nexo_mail/tools/gmail_imap.rb` + `gmail_imap/` |
 | Integration — HEY (CLI) | `lib/nexo_mail/tools/hey_box.rb`, `hey_thread.rb`, `cli_reader.rb` |
 | Integration — Apple Mail (MCP) | `mcp :mail` in `lib/nexo_mail/agents/apple_mail_source.rb` |

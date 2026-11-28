@@ -7,7 +7,7 @@ module NexoMail
     # and the triage instructions live here. Mail access stays read-only; the one
     # thing a source agent writes is its extraction file in the workspace.
     class SourceAgent < Base
-      skills :email_triage, :financial_summary, :interest_radar
+      skills "email-triage", "financial-summary", "interest-radar"
 
       # The one thing that advances the inbox's ledger. It changes files on the host
       # (the ledger, and the extraction file in the workspace), so it is declared
@@ -18,8 +18,8 @@ module NexoMail
         You triage ONE email inbox and EXTRACT it into structured JSON, following the
         attached skills: read the mail that is NEW since the last run, classify each
         message into action/fyi/noise, and pull the entities that matter — payments &
-        charges (financial_summary), meetings, people, and newsletter topics
-        (interest_radar). The listing tools only show mail no earlier run has triaged;
+        charges (financial-summary), meetings, people, and newsletter topics
+        (interest-radar). The listing tools only show mail no earlier run has triaged;
         what earlier runs extracted is already on record. Write a single JSON array of
         the NEW item objects to the file the prompt names, with the write tool — no
         prose in the file, just the array, and `[]` when nothing new arrived — then
